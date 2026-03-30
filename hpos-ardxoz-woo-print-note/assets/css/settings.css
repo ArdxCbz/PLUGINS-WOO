@@ -1,0 +1,10 @@
+#ventova_logo_preview {
+    margin-bottom: 10px;
+}
+#ventova_upload_logo, #ventova_remove_logo {
+    margin-right: 10px;
+}
+@page {
+    size: 80mm auto;
+    margin: 2;
+}

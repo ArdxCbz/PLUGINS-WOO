@@ -1,0 +1,99 @@
+@page {
+    size: 80mm auto;
+    margin: 0;
+}
+
+body {
+    font-family: 'Roboto', Arial, sans-serif;
+    width: 80mm;
+    margin: 0 auto;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 3mm;
+}
+
+.nota-header {
+    text-align: center;
+    border-bottom: 2px solid #000;
+    margin-bottom: 3mm;
+    padding-bottom: 3mm;
+}
+
+.nota-header img {
+    max-width: 288px;
+    height: auto;
+    margin-bottom: 2mm;
+}
+
+.nota-header h2 {
+    margin: 2mm 0;
+    font-size: 16px;
+}
+
+.nota-datos {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 3mm;
+}
+
+.nota-datos td {
+    padding: 1mm 0;
+    font-size: 14px;
+}
+
+.nota-items {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2mm;
+}
+
+.nota-items thead {
+    border-bottom: 2px solid #000;
+}
+
+.nota-items th {
+    padding: 2mm 1mm;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.nota-items td {
+    padding: 2mm 1mm;
+    font-size: 11px;
+}
+
+.nota-totales {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2mm;
+}
+
+.nota-totales td {
+    padding: 1mm;
+    font-size: 12px;
+}
+
+.nota-totales .total-final {
+    border-top: 2px solid #000;
+}
+
+.nota-totales .total-final td {
+    padding: 2mm 1mm;
+    font-size: 14px;
+}
+
+.nota-footer {
+    margin-top: 5mm;
+    padding-top: 3mm;
+}
+
+.centrar {
+    text-align: center;
+    margin-top: 3mm;
+}
+
+@media print {
+    button {
+        display: none;
+    }
+}
