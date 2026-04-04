@@ -34,6 +34,11 @@ function personalizar_menu_vendedor()
         // Remover la pestaña "Cost of Goods" dentro de WooCommerce Settings
         remove_submenu_page('woocommerce', 'wc-settings&tab=alg_wc_cost_of_goods');
 
+        // Remover plugins extras
+        remove_menu_page('webappick-manage-feeds');
+        remove_menu_page('wc-admin&path=/marketing'); // React path
+        remove_menu_page('woocommerce-marketing'); // Normal slug
+
         // Oculta todo el menú de WooCommerce (HPOS)
         remove_menu_page('woocommerce');
         // Elimina explícitamente el menú de "Productos" si aún aparece
