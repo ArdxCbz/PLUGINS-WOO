@@ -47,7 +47,7 @@ Thumbs.db
 
 # Plugin zips
 *.zip
-
+*.png
 # Tool-specific
 .sass-cache/
 .eslintcache
