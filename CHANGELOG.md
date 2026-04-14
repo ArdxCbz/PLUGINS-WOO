@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v1.2.1
+- **fix(autoreload):** Exclusión de `armandxcrazy@gmail.com` para evitar recargas accidentales durante el uso de DEMV.
+- **fix(autoreload):** Ajuste de z-index a 9999 para mejorar compatibilidad visual con modales de otros plugins.
+- **chore:** Limpieza de lógica de frontend (`MutationObserver`) en favor de verificación de backend.
+
 ## v1.2.0
 - **feat(pago-qr):** Nueva pasarela `hpos-ardxoz-pagoqr` optimizada para HPOS.
 - **feat(pago-qr):** Soporte nativo para WooCommerce Blocks (nuevo Checkout).

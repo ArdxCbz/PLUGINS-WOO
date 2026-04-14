@@ -28,6 +28,19 @@ function ventova_child_autoreload_orders()
     if (!current_user_can('administrator') && !current_user_can('vendedor'))
         return;
 
+    // ── Novedad: Excluir a los administradores que usan DEMV ──
+    $current_user = wp_get_current_user();
+
+    // Coloca aquí los IDs o correos de los usuarios que NO deben tener auto-recarga
+    $usuarios_excluidos = array(
+        'armandxcrazy@gmail.com',
+        // 123, // También se puede excluir por ID numérico de usuario
+    );
+
+    if (in_array($current_user->user_email, $usuarios_excluidos, true) || in_array($current_user->ID, $usuarios_excluidos, true)) {
+        return; // No imprimir el script para ellos
+    }
+
     // Validar pantalla actual
     $screen = get_current_screen();
     if (!$screen)
@@ -63,7 +76,7 @@ function ventova_child_autoreload_orders()
                 width: "100%",
                 height: "4px",
                 background: "linear-gradient(90deg, #2563eb, #3b82f6, #93c5fd)",
-                zIndex: "999999",
+                zIndex: "9999",
                 transformOrigin: "left center",
                 transform: "scaleX(1)",
                 transition: "transform " + (interval / 1000) + "s linear"
@@ -81,7 +94,7 @@ function ventova_child_autoreload_orders()
                 color: "#fff",
                 fontWeight: "600",
                 fontFamily: "monospace",
-                zIndex: "999999",
+                zIndex: "9999",
                 background: "rgba(15, 23, 42, 0.75)",
                 backdropFilter: "blur(4px)",
                 padding: "4px 10px",
@@ -137,7 +150,7 @@ function ventova_child_autoreload_orders()
             // Detectar si navega paginaciones o filtros (via ajax si fuera el caso, pero usualmente es submit/click)
             document.addEventListener("change", resetTimer);
             document.addEventListener("submit", resetTimer);
-            document.addEventListener("keyup", resetTimer); // resetear al escribir en bucscador
+            document.addEventListener("keyup", resetTimer); // resetear al escribir en buscador
 
         })();
     </script>
