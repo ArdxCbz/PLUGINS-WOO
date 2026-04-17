@@ -2,7 +2,7 @@
 /*
  * Plugin Name: Pago QR HPOS
  * Description: Pasarela de pago mediante código QR compatible con HPOS. Permite adjuntar comprobante de pago durante el pedido.
- * Version: 1.2.0
+ * Version: 1.3.0
  * Author: Ventova
  * Text Domain: hpos-ardxoz-pagoqr
  * Requires at least: 5.8

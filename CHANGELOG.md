@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v1.3.0
+- **feat(woo):** Nueva lógica de promoción de Cajas de Regalo automáticas basada en umbral de precio (350 Bs).
+- **feat(woo):** Prorrateo inteligente de precios en cajas manuales cuando se aplica la promoción.
+- **feat(woo):** Vinculación automática de regalos según la sucursal del producto principal.
+- **chore:** Sincronización de versiones para `ventova-store-child` y `hpos-ardxoz-pagoqr`.
+
+
 ## v1.2.1
 - **fix(autoreload):** Exclusión de `armandxcrazy@gmail.com` para evitar recargas accidentales durante el uso de DEMV.
 - **fix(autoreload):** Ajuste de z-index a 9999 para mejorar compatibilidad visual con modales de otros plugins.
