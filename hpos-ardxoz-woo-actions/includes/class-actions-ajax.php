@@ -50,7 +50,7 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
 
     private static function get_order_or_fail()
     {
-        $order_id = intval($_POST['order_id'] ?? 0);
+        $order_id = absint($_POST['order_id'] ?? 0);
         if (!$order_id) {
             wp_send_json_error(array('message' => 'ID de pedido inválido'));
         }
@@ -98,10 +98,12 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
 
         wp_send_json_success(array(
             'customer_name'     => $order->get_formatted_billing_full_name(),
+            'order_number'      => $order->get_order_number(),
             'shipping_method'   => $order->get_shipping_method(),
             'costo_courier'     => $costo,
             'costo_retorno'     => $costo_retorno,
             'shipping_postcode' => $order->get_shipping_postcode(),
+            'monto_efectivo'    => self::resolve_meta($order, '_hpos_ardxoz_woo_monto_efectivo'),
         ));
     }
 
@@ -181,8 +183,9 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
         self::verify_admin_nonce();
         $order = self::get_order_or_fail();
 
-        $postcode = sanitize_text_field($_POST['postcode'] ?? '');
-        $costo    = sanitize_text_field($_POST['costo_courier'] ?? '');
+        $postcode = wc_clean(wp_unslash($_POST['postcode'] ?? ''));
+        $costo    = wc_clean(wp_unslash($_POST['costo_courier'] ?? ''));
+        $monto    = wc_clean(wp_unslash($_POST['monto_efectivo'] ?? ''));
 
         if (!$postcode) {
             wp_send_json_error(array('message' => 'Guía de envío requerida'));
@@ -197,6 +200,10 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
         // Costo envío
         if ($costo !== '') {
             $order->update_meta_data('_hpos_ardxoz_woo_costo_envio', floatval($costo));
+        }
+
+        if ($monto !== '') {
+            $order->update_meta_data('_hpos_ardxoz_woo_monto_efectivo', floatval(substr($monto, 0, 9)));
         }
 
         $order->set_status('en-curso', 'En curso con guía: ' . $postcode);
@@ -260,8 +267,9 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
         self::verify_vendedor_nonce();
         $order = self::get_order_or_fail();
 
-        $postcode = sanitize_text_field($_POST['postcode'] ?? '');
-        $costo    = sanitize_text_field($_POST['costo_courier'] ?? '');
+        $postcode       = wc_clean(wp_unslash($_POST['postcode'] ?? ''));
+        $costo          = wc_clean(wp_unslash($_POST['costo_courier'] ?? ''));
+        $monto_efectivo = wc_clean(wp_unslash($_POST['monto_efectivo'] ?? ''));
 
         if (!$postcode) {
             wp_send_json_error(array('message' => 'Número de guía requerido'));
@@ -272,6 +280,20 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
 
         if ($costo !== '') {
             $order->update_meta_data('_hpos_ardxoz_woo_costo_envio', floatval($costo));
+        }
+
+        if ($monto_efectivo !== '') {
+            // Limitar a 9 caracteres
+            $monto_efectivo = substr($monto_efectivo, 0, 9);
+            
+            // Solo guardar si no tiene valor previo (protección contra reingreso)
+            $valor_actual = $order->get_meta('_hpos_ardxoz_woo_monto_efectivo', true);
+            if (empty($valor_actual)) {
+                $order->update_meta_data('_hpos_ardxoz_woo_monto_efectivo', floatval($monto_efectivo));
+            } else {
+                // Opcional: Podríamos enviar un error, pero el requisito dice "no se pueda volver a reingresar"
+                // lo cual implica que el valor existente es sagrado.
+            }
         }
 
         $order->set_status('en-curso', 'Guía ingresada por vendedor: ' . $postcode);

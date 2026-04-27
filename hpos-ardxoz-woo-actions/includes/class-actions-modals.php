@@ -95,6 +95,9 @@ class HPOS_Ardxoz_Woo_Actions_Modals
 
                 <label>Costo de Envío:</label>
                 <input type="text" name="costo_courier" value="<?php echo esc_attr(HAWA_DEFAULT_COSTO_ENVIO); ?>">
+
+                <label>Monto Efectivo:</label>
+                <input type="text" name="monto_efectivo" maxlength="9" placeholder="0.00">
                 <div class="hawa-modal-footer">
                     <button id="hawa-save-encurso" class="button button-primary">Guardar</button>
                 </div>
@@ -138,6 +141,9 @@ class HPOS_Ardxoz_Woo_Actions_Modals
 
                 <label>Costo de Envío:</label>
                 <input type="text" id="hawa-guia-costo" value="<?php echo esc_attr(HAWA_DEFAULT_COSTO_ENVIO); ?>">
+
+                <label>Monto Efectivo:</label>
+                <input type="text" id="hawa-guia-monto-efectivo" placeholder="0.00" maxlength="9">
 
                 <div class="hawa-modal-footer">
                     <button id="hawa-save-guia" class="button button-primary">Guardar</button>

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HPOS Ardxoz Woo Actions
  * Description: Botones de acción y modales para vendedor y administrador en lista de pedidos HPOS.
- * Version:     1.0
+ * Version:     2.0
  * Author:      Ardxoz
  */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 
 define('HAWA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HAWA_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('HAWA_VERSION', '1.0');
+define('HAWA_VERSION', '2.0');
 define('HAWA_DEFAULT_COSTO_ENVIO', 12.48);
 
 use Automattic\WooCommerce\Utilities\FeaturesUtil;

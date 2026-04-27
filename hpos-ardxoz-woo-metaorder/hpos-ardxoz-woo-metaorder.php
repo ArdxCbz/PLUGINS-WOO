@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HPOS Ardxoz Woo MetaOrder
  * Description: Campos personalizados dinámicos para pedidos WooCommerce, compatible con HPOS. Administrador de campos via CPT.
- * Version:     3.0
+ * Version:     4.0
  * Author:      Ardxoz
  */
 
@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
 }
 
 define('HAWM_PLUGIN_DIR', plugin_dir_path(__FILE__));
-define('HAWM_PLUGIN_VERSION', '3.0');
+define('HAWM_PLUGIN_VERSION', '4.0');
 
 use Automattic\WooCommerce\Utilities\FeaturesUtil;
 
@@ -22,6 +22,74 @@ add_action('before_woocommerce_init', function () {
     }
 });
 
+/**
+ * Lista blanca de atributos HTML permitidos en los inputs generados.
+ */
+function hawm_allowed_attribute_names()
+{
+    return array(
+        'placeholder', 'step', 'min', 'max',
+        'maxlength', 'minlength', 'pattern', 'inputmode', 'autocomplete',
+    );
+}
+
+/**
+ * Parsea una cadena de atributos "nombre=\"valor\"" en un array asociativo.
+ * Espera input ya sin slashes (p. ej. get_post_meta). El llamante debe aplicar wp_unslash si viene de $_POST.
+ */
+function hawm_parse_attributes_string($raw)
+{
+    $raw = is_string($raw) ? trim($raw) : '';
+    $out = array();
+    if ($raw === '') {
+        return $out;
+    }
+
+    preg_match_all('/([a-zA-Z_-]+)\s*=\s*"([^"]*)"/', $raw, $matches, PREG_SET_ORDER);
+    foreach ($matches as $pair) {
+        $name = strtolower($pair[1]);
+        $out[$name] = $pair[2];
+    }
+    return $out;
+}
+
+/**
+ * Construye la cadena de atributos serializada a partir de pares asociativos.
+ * Descarta nombres fuera de la allowlist y valores con "javascript:".
+ */
+function hawm_build_attributes_string(array $parts)
+{
+    $allowed = hawm_allowed_attribute_names();
+    $out = array();
+    foreach ($allowed as $name) {
+        if (!array_key_exists($name, $parts)) {
+            continue;
+        }
+        $value = trim((string) $parts[$name]);
+        if ($value === '') {
+            continue;
+        }
+        if (stripos($value, 'javascript:') !== false) {
+            continue;
+        }
+        $out[] = $name . '="' . esc_attr($value) . '"';
+    }
+    return implode(' ', $out);
+}
+
+/**
+ * Sanitiza una cadena de atributos HTML con allowlist.
+ * Defensa en profundidad para datos legacy: parse + rebuild.
+ */
+function hawm_sanitize_attributes_string($raw)
+{
+    $raw = is_string($raw) ? trim(wp_unslash($raw)) : '';
+    if ($raw === '') {
+        return '';
+    }
+    return hawm_build_attributes_string(hawm_parse_attributes_string($raw));
+}
+
 // Inicializar el plugin
 require_once HAWM_PLUGIN_DIR . 'includes/class-hpos-ardxoz-woo-metaorder.php';
 
@@ -30,111 +98,3 @@ add_action('plugins_loaded', function () {
         new HPOS_Ardxoz_Woo_MetaOrder();
     }
 });
-
-// Seed: crear los 7 campos por defecto al activar el plugin
-register_activation_hook(__FILE__, 'hawm_seed_default_fields');
-
-function hawm_seed_default_fields()
-{
-    // Si ya se ejecutó el seed, no repetir
-    if (get_option('hawm_fields_seeded')) {
-        return;
-    }
-
-    // Registrar el CPT primero (no está disponible durante activación)
-    register_post_type('haw_field', array('public' => false));
-
-    $defaults = array(
-        array(
-            'title' => 'Fecha de Depósito',
-            'slug'  => 'fecha_deposito',
-            'type'  => 'date',
-            'group' => 'Depósito',
-            'attrs' => '',
-            'opts'  => '',
-            'order' => 1,
-        ),
-        array(
-            'title' => 'Número de Depósito',
-            'slug'  => 'numero_deposito',
-            'type'  => 'text',
-            'group' => 'Depósito',
-            'attrs' => 'pattern="[0-9\-]+" placeholder="0000-00000-0000"',
-            'opts'  => '',
-            'order' => 2,
-        ),
-        array(
-            'title' => 'Monto de Depósito',
-            'slug'  => 'monto_deposito',
-            'type'  => 'number',
-            'group' => 'Depósito',
-            'attrs' => 'step="0.01"',
-            'opts'  => '',
-            'order' => 3,
-        ),
-        array(
-            'title' => 'Fecha de Retorno',
-            'slug'  => 'fecha_retorno',
-            'type'  => 'date',
-            'group' => 'Retorno',
-            'attrs' => '',
-            'opts'  => '',
-            'order' => 4,
-        ),
-        array(
-            'title' => 'Retorno',
-            'slug'  => 'checkbox_retorno',
-            'type'  => 'radio',
-            'group' => 'Retorno',
-            'attrs' => '',
-            'opts'  => "si|Sí\nno|No",
-            'order' => 5,
-        ),
-        array(
-            'title' => 'Costo de Retorno',
-            'slug'  => 'costo_retorno',
-            'type'  => 'number',
-            'group' => 'Retorno',
-            'attrs' => 'step="0.01"',
-            'opts'  => '',
-            'order' => 6,
-        ),
-        array(
-            'title' => 'Costo de Envío',
-            'slug'  => 'costo_envio',
-            'type'  => 'number',
-            'group' => 'Envío',
-            'attrs' => 'step="0.01"',
-            'opts'  => '',
-            'order' => 7,
-        ),
-        array(
-            'title' => 'Numero de Guía',
-            'slug'  => 'numero_guia',
-            'type'  => 'text',
-            'group' => 'Envío',
-            'attrs' => 'maxlength="30"',
-            'opts'  => '',
-            'order' => 8,
-        ),
-    );
-
-    foreach ($defaults as $field) {
-        $post_id = wp_insert_post(array(
-            'post_type'   => 'haw_field',
-            'post_title'  => $field['title'],
-            'post_name'   => $field['slug'],
-            'post_status' => 'publish',
-            'menu_order'  => $field['order'],
-        ));
-
-        if ($post_id && !is_wp_error($post_id)) {
-            update_post_meta($post_id, '_haw_field_type', $field['type']);
-            update_post_meta($post_id, '_haw_field_group', $field['group']);
-            update_post_meta($post_id, '_haw_field_attributes', $field['attrs']);
-            update_post_meta($post_id, '_haw_field_options', $field['opts']);
-        }
-    }
-
-    update_option('hawm_fields_seeded', true);
-}

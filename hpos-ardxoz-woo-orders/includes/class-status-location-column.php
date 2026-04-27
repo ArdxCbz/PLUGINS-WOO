@@ -41,6 +41,19 @@ class Status_Location_Column
             return;
         }
 
+        // 0. Efectivo y QR (Cálculo dinámico)
+        $monto_efectivo = Meta_Resolver::get($order, '_hpos_ardxoz_woo_monto_efectivo');
+        
+        if (!empty($monto_efectivo)) {
+            $total_pedido = $order->get_total();
+            $monto_qr = floatval($total_pedido) - floatval($monto_efectivo);
+            
+            echo '<div style="margin-bottom:8px; font-size:11px; line-height:1; display:flex; flex-direction:column; gap:4px; background:#fff; padding:5px; border:1px solid #eee; border-radius:4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">';
+            echo '<div><span style="color:#2c3e50; font-weight:800; text-transform:uppercase; font-size:9px;">Efectivo:</span> <span style="color:#d35400; font-weight:bold; font-size:12px;">' . wc_price($monto_efectivo) . '</span></div>';
+            echo '<div><span style="color:#2c3e50; font-weight:800; text-transform:uppercase; font-size:9px;">QR:</span> <span style="color:#27ae60; font-weight:bold; font-size:12px;">' . wc_price($monto_qr) . '</span></div>';
+            echo '</div>';
+        }
+
         // 1. Estado (badge nativo WooCommerce)
         $status_slug = $order->get_status();
         $status_name = wc_get_order_status_name($status_slug);

@@ -33,8 +33,10 @@ function personalizar_menu_vendedor()
         remove_submenu_page('wpfactory', 'wpfactory-cross-selling');
         // Remover la pestaña "Cost of Goods" dentro de WooCommerce Settings
         remove_submenu_page('woocommerce', 'wc-settings&tab=alg_wc_cost_of_goods');
-
-        // Remover plugins extras
+		// Remover menu del tema
+        remove_menu_page('vs-reglas');
+		
+		// Remover plugins extras
         remove_menu_page('webappick-manage-feeds');
         remove_menu_page('wc-admin&path=/marketing'); // React path
         remove_menu_page('woocommerce-marketing'); // Normal slug
@@ -88,112 +90,125 @@ function agregar_menu_productos_personalizado()
 // Contenido de la página de productos personalizados
 function mostrar_pagina_productos_personalizados()
 {
-    $user = wp_get_current_user();
-
-    // Verifica que el usuario tenga el rol "vendedor"
-    if (!in_array('vendedor', $user->roles)) {
-        wp_die(__('No tienes permiso para acceder a esta página.', 'text_domain'));
+    if (!in_array('vendedor', wp_get_current_user()->roles)) {
+        wp_die(__('No tienes permiso para acceder a esta página.'));
     }
 
-    // Filtro de categoría
-    echo '<div class="wrap"><h1>' . __('Lista de Productos', 'text_domain') . '</h1>';
-    echo '<form method="get" action="">';
-    echo '<input type="hidden" name="page" value="productos_personalizados" />';
-
-    // Selector de categoría
-    $terms = get_terms(['taxonomy' => 'product_cat', 'hide_empty' => true]);
-    echo '<select name="product_cat" onchange="this.form.submit()">'; // Enviar formulario al cambiar categoría
-    echo '<option value="">' . __('Todas las Categorías', 'text_domain') . '</option>';
-    foreach ($terms as $term) {
-        echo '<option value="' . esc_attr($term->slug) . '"' . selected($term->slug, $_GET['product_cat'] ?? '', false) . '>' . esc_html($term->name) . '</option>';
-    }
-    echo '</select>';
-    echo '</form>';
-
-    // Tabla de productos
-    echo '<table class="wp-list-table widefat fixed striped products">';
-    echo '<thead><tr><th>' . __('Imagen', 'text_domain') . '</th><th>' . __('Nombre del Producto', 'text_domain') . '</th><th>' . __('Stock por Sucursal', 'text_domain') . '</th></tr></thead><tbody>';
-
-    // Query para obtener los productos con filtro de categoría y en stock
-    $args = [
-        'post_type' => 'product',
-        'posts_per_page' => -1,
-        'meta_query' => [
-            [
-                'key' => '_stock_status',
-                'value' => 'instock', // Solo productos en stock
-                'compare' => '='
-            ]
-        ]
+    $badge_map = [
+        'COCHABAMBA' => ['bg' => '#4a9fd5', 'label' => 'CBBA'],
+        'SANTA CRUZ'  => ['bg' => '#32a852', 'label' => 'SCZ'],
+        'LA PAZ'     => ['bg' => '#d94040', 'label' => 'LPZ'],
     ];
-
-    if (!empty($_GET['product_cat'])) {
-        $args['tax_query'] = [
-            [
-                'taxonomy' => 'product_cat',
-                'field' => 'slug',
-                'terms' => sanitize_text_field($_GET['product_cat'])
-            ]
-        ];
-    }
-
-    $productos = new WP_Query($args);
-
-    if ($productos->have_posts()) {
-        while ($productos->have_posts()) {
-            $productos->the_post();
-            global $post;
-
-            // Obtener la miniatura
-            $thumbnail = get_the_post_thumbnail($post->ID, 'thumbnail') ?: __('No image', 'text_domain');
-
-            // Mostrar stock por sucursal y color en una sola línea
-            $product = wc_get_product($post->ID);
-            $stock_info = '';
-
-            if ($product && $product->is_type('variable')) {
-                $variations = $product->get_available_variations();
-
-                foreach ($variations as $variation) {
-                    $variation_product = wc_get_product($variation['variation_id']);
-
-                    if ($variation_product) {
-                        $sucursal = $variation_product->get_attribute('pa_sucursal');
-                        $color = $variation_product->get_attribute('pa_color');
-                        $stock_quantity = $variation_product->get_stock_quantity();
-
-                        // Asignación de estilos por sucursal usando match()
-                        $location_display = match ($sucursal) {
-                            'COCHABAMBA' => '<span style="background-color: #87CEEB; color: white; padding: 2px 5px; border-radius: 3px;">CBBA</span>',
-                            'SANTA CRUZ' => '<span style="background-color: #32CD32; color: white; padding: 2px 5px; border-radius: 3px;">SCZ</span>',
-                            'LA PAZ' => '<span style="background-color: #FF0000; color: white; padding: 2px 5px; border-radius: 3px;">LPZ</span>',
-                            default => '<span style="color: gray;">Sucursal desconocida</span>',
-                        };
-
-                        if ($stock_quantity > 0) {
-                            // Formato en una sola línea con el color específico de la sucursal
-                            $stock_info .= $location_display;
-                            $stock_info .= ' → <span style="color: gray;">' . esc_html($color) . '</span> ';
-                            $stock_info .= '<span style="color: gray; font-style: bold;">(' . $stock_quantity . ') En stock</span><br>';
-                        }
-                    }
+    ?>
+    <style>
+        #vs-prod-wrap h1 { font-size: 18px; margin-bottom: 8px; }
+        #vs-prod-filter { margin-bottom: 8px; }
+        #vs-prod-filter select { font-size: 12px; padding: 3px 6px; height: 28px; }
+        #vs-prod-table { font-size: 12px; border-collapse: collapse; max-width: 860px; }
+        #vs-prod-table th { background: #f0f0f0; padding: 5px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+        #vs-prod-table td { padding: 4px 8px; vertical-align: middle; border-bottom: 1px solid #ebebeb; }
+        #vs-prod-table img { width: 44px; height: 44px; object-fit: cover; border-radius: 3px; display: block; }
+        .vs-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; color: #fff; margin-right: 2px; vertical-align: middle; }
+        .vs-stock-line { display: inline-flex; align-items: center; gap: 4px; margin: 1px 4px 1px 0; white-space: nowrap; }
+        .vs-stock-color { color: #666; font-size: 11px; }
+        .vs-stock-qty { font-weight: 700; color: #333; font-size: 11px; }
+    </style>
+    <div class="wrap" id="vs-prod-wrap">
+        <h1>Lista de Productos</h1>
+        <div id="vs-prod-filter">
+            <form method="get">
+                <input type="hidden" name="page" value="productos_personalizados" />
+                <?php
+                $terms = get_terms(['taxonomy' => 'product_cat', 'hide_empty' => true]);
+                echo '<select name="product_cat" onchange="this.form.submit()">';
+                echo '<option value="">— Todas las categorías —</option>';
+                foreach ($terms as $term) {
+                    printf(
+                        '<option value="%s"%s>%s</option>',
+                        esc_attr($term->slug),
+                        selected($term->slug, $_GET['product_cat'] ?? '', false),
+                        esc_html($term->name)
+                    );
                 }
-            } else {
-                $stock_info = __('Sin stock en sucursales', 'text_domain');
+                echo '</select>';
+                ?>
+            </form>
+        </div>
+
+        <table id="vs-prod-table" class="wp-list-table widefat fixed striped">
+            <thead>
+                <tr>
+                    <th style="width:54px">Img</th>
+                    <th>Producto</th>
+                    <th>Stock por sucursal</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php
+            $args = [
+                'post_type'      => 'product',
+                'posts_per_page' => -1,
+                'meta_query'     => [[
+                    'key'     => '_stock_status',
+                    'value'   => 'instock',
+                    'compare' => '=',
+                ]],
+            ];
+            if (!empty($_GET['product_cat'])) {
+                $args['tax_query'] = [[
+                    'taxonomy' => 'product_cat',
+                    'field'    => 'slug',
+                    'terms'    => sanitize_text_field($_GET['product_cat']),
+                ]];
             }
 
-            echo '<tr>';
-            echo '<td>' . $thumbnail . '</td>';
-            echo '<td>' . get_the_title() . '</td>';
-            echo '<td>' . $stock_info . '</td>';
-            echo '</tr>';
-        }
-    } else {
-        echo '<tr><td colspan="3">' . __('No hay productos encontrados.', 'text_domain') . '</td></tr>';
-    }
+            $productos = new WP_Query($args);
 
-    wp_reset_postdata();
-    echo '</tbody></table></div>';
+            if ($productos->have_posts()) :
+                while ($productos->have_posts()) :
+                    $productos->the_post();
+                    $product    = wc_get_product(get_the_ID());
+                    $thumbnail  = get_the_post_thumbnail(get_the_ID(), [44, 44]) ?: '<span style="color:#ccc">—</span>';
+                    $stock_html = '';
+
+                    if ($product && $product->is_type('variable')) {
+                        foreach ($product->get_available_variations() as $variation) {
+                            $vp  = wc_get_product($variation['variation_id']);
+                            if (!$vp) continue;
+                            $qty = $vp->get_stock_quantity();
+                            if ($qty <= 0) continue;
+                            $suc   = strtoupper(trim($vp->get_attribute('pa_sucursal')));
+                            $color = esc_html($vp->get_attribute('pa_color'));
+                            $b     = $badge_map[$suc] ?? ['bg' => '#999', 'label' => $suc ?: '?'];
+                            $stock_html .= sprintf(
+                                '<span class="vs-stock-line"><span class="vs-badge" style="background:%s">%s</span><span class="vs-stock-color">%s</span><span class="vs-stock-qty">(%d)</span></span>',
+                                esc_attr($b['bg']),
+                                esc_html($b['label']),
+                                $color,
+                                $qty
+                            );
+                        }
+                    }
+                    if (!$stock_html) {
+                        $stock_html = '<span style="color:#bbb;font-size:11px;">Sin stock</span>';
+                    }
+                    ?>
+                    <tr>
+                        <td><?php echo $thumbnail; ?></td>
+                        <td style="font-weight:600"><?php the_title(); ?></td>
+                        <td><?php echo $stock_html; ?></td>
+                    </tr>
+                    <?php
+                endwhile;
+            else :
+                echo '<tr><td colspan="3" style="color:#999;text-align:center;padding:14px">No hay productos encontrados.</td></tr>';
+            endif;
+            wp_reset_postdata();
+            ?>
+            </tbody>
+        </table>
+    </div>
+    <?php
 }
 
 // #### F) SOLUCION DE CONFLICTOS JS

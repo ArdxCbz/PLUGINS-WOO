@@ -14,13 +14,20 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
         // Columnas en listado
         add_filter('manage_haw_field_posts_columns', array($this, 'add_columns'));
         add_action('manage_haw_field_posts_custom_column', array($this, 'render_columns'), 10, 2);
+        add_filter('manage_edit-haw_field_sortable_columns', array($this, 'sortable_columns'));
 
         // Orden por defecto por menu_order
         add_action('pre_get_posts', array($this, 'default_order'));
 
-        // Botón seed en listado
+        // Botón seed (solo aparece cuando no hay campos publicados)
         add_action('admin_notices', array($this, 'render_seed_button'));
         add_action('wp_ajax_hawm_seed_fields', array($this, 'ajax_seed_fields'));
+
+        // Invalidación del cache de definición al modificar el CPT
+        add_action('save_post_haw_field', array($this, 'invalidate_cache'));
+        add_action('deleted_post', array($this, 'maybe_invalidate_cache'));
+        add_action('trashed_post', array($this, 'maybe_invalidate_cache'));
+        add_action('untrashed_post', array($this, 'maybe_invalidate_cache'));
     }
 
     public function register_field_cpt()
@@ -67,7 +74,7 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
 
         add_meta_box(
             'haw_field_slug',
-            __('Meta Key', 'haw'),
+            __('Slug', 'haw'),
             array($this, 'render_slug_metabox'),
             'haw_field',
             'side',
@@ -79,10 +86,19 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
     {
         wp_nonce_field('haw_field_save', 'haw_field_nonce');
 
-        $type       = get_post_meta($post->ID, '_haw_field_type', true) ?: 'text';
-        $options    = get_post_meta($post->ID, '_haw_field_options', true) ?: '';
-        $attributes = get_post_meta($post->ID, '_haw_field_attributes', true) ?: '';
-        $group      = get_post_meta($post->ID, '_haw_field_group', true) ?: '';
+        $type        = get_post_meta($post->ID, '_haw_field_type', true) ?: 'text';
+        $options     = get_post_meta($post->ID, '_haw_field_options', true) ?: '';
+        $attributes  = get_post_meta($post->ID, '_haw_field_attributes', true) ?: '';
+        $group       = get_post_meta($post->ID, '_haw_field_group', true) ?: '';
+        $enabled_raw = get_post_meta($post->ID, '_haw_field_enabled', true);
+        // Default: activo (los campos pre-existentes sin esta meta se consideran activos)
+        $enabled     = ($enabled_raw === '' || $enabled_raw === '1');
+
+        // Rehidrata los atributos almacenados en campos individuales.
+        $attrs_parts = hawm_parse_attributes_string($attributes);
+        $attr_val = function ($key) use ($attrs_parts) {
+            return isset($attrs_parts[$key]) ? $attrs_parts[$key] : '';
+        };
 
         $types = array(
             'text'     => 'Texto',
@@ -94,6 +110,16 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
         );
         ?>
         <table class="form-table">
+            <tr>
+                <th><label for="haw_field_enabled"><?php esc_html_e('Estado', 'haw'); ?></label></th>
+                <td>
+                    <label>
+                        <input type="checkbox" id="haw_field_enabled" name="haw_field_enabled" value="1" <?php checked($enabled); ?>>
+                        <?php esc_html_e('Campo activo (se muestra en pedidos)', 'haw'); ?>
+                    </label>
+                    <p class="description"><?php esc_html_e('Al desactivar se oculta del metabox del pedido, pero los datos guardados en pedidos existentes NO se borran.', 'haw'); ?></p>
+                </td>
+            </tr>
             <tr>
                 <th><label for="haw_field_type"><?php esc_html_e('Tipo de Campo', 'haw'); ?></label></th>
                 <td>
@@ -118,11 +144,82 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
                     <p class="description"><?php esc_html_e('Una opción por línea: valor|etiqueta', 'haw'); ?></p>
                 </td>
             </tr>
-            <tr>
-                <th><label for="haw_field_attributes"><?php esc_html_e('Atributos HTML', 'haw'); ?></label></th>
+        </table>
+
+        <h3 style="margin-top:1.5em; padding-top:1em; border-top:1px solid #dcdcde;">
+            <?php esc_html_e('Atributos del campo', 'haw'); ?>
+        </h3>
+        <p class="description" style="margin:0 0 1em;">
+            <?php esc_html_e('Deja en blanco lo que no apliquee. Solo verás los atributos relevantes al tipo seleccionado.', 'haw'); ?>
+        </p>
+        <table class="form-table">
+            <tr class="haw-attr-row" data-types="text number date textarea">
+                <th><label for="haw_attr_placeholder"><?php esc_html_e('Texto de ayuda', 'haw'); ?></label></th>
                 <td>
-                    <input type="text" id="haw_field_attributes" name="haw_field_attributes" value="<?php echo esc_attr($attributes); ?>" style="width:100%;" placeholder='step="0.01" placeholder="0.00" maxlength="30"'>
-                    <p class="description"><?php esc_html_e('Atributos adicionales para el input (pattern, placeholder, step, maxlength, etc).', 'haw'); ?></p>
+                    <input type="text" id="haw_attr_placeholder" name="haw_attr_placeholder" value="<?php echo esc_attr($attr_val('placeholder')); ?>" class="regular-text">
+                    <p class="description"><?php esc_html_e('Texto gris que aparece cuando el campo está vacío (placeholder). Ej: "0000-00000-0000".', 'haw'); ?></p>
+                </td>
+            </tr>
+            <tr class="haw-attr-row" data-types="number date">
+                <th><label for="haw_attr_step"><?php esc_html_e('Incremento', 'haw'); ?></label></th>
+                <td>
+                    <input type="text" id="haw_attr_step" name="haw_attr_step" value="<?php echo esc_attr($attr_val('step')); ?>" style="width:120px;">
+                    <p class="description"><?php esc_html_e('Paso permitido (step). Ej: 0.01 para decimales, 1 para enteros, "any" para cualquier valor.', 'haw'); ?></p>
+                </td>
+            </tr>
+            <tr class="haw-attr-row" data-types="number date">
+                <th><label for="haw_attr_min"><?php esc_html_e('Valor mínimo', 'haw'); ?></label></th>
+                <td>
+                    <input type="text" id="haw_attr_min" name="haw_attr_min" value="<?php echo esc_attr($attr_val('min')); ?>" style="width:160px;">
+                    <p class="description"><?php esc_html_e('Número o fecha mínima aceptada (min).', 'haw'); ?></p>
+                </td>
+            </tr>
+            <tr class="haw-attr-row" data-types="number date">
+                <th><label for="haw_attr_max"><?php esc_html_e('Valor máximo', 'haw'); ?></label></th>
+                <td>
+                    <input type="text" id="haw_attr_max" name="haw_attr_max" value="<?php echo esc_attr($attr_val('max')); ?>" style="width:160px;">
+                    <p class="description"><?php esc_html_e('Número o fecha máxima aceptada (max).', 'haw'); ?></p>
+                </td>
+            </tr>
+            <tr class="haw-attr-row" data-types="text textarea">
+                <th><label for="haw_attr_maxlength"><?php esc_html_e('Longitud máxima', 'haw'); ?></label></th>
+                <td>
+                    <input type="number" id="haw_attr_maxlength" name="haw_attr_maxlength" value="<?php echo esc_attr($attr_val('maxlength')); ?>" style="width:120px;" min="0">
+                    <p class="description"><?php esc_html_e('Número máximo de caracteres (maxlength). Ej: 30.', 'haw'); ?></p>
+                </td>
+            </tr>
+            <tr class="haw-attr-row" data-types="text">
+                <th><label for="haw_attr_inputmode"><?php esc_html_e('Teclado en móvil', 'haw'); ?></label></th>
+                <td>
+                    <select id="haw_attr_inputmode" name="haw_attr_inputmode" style="width:240px;">
+                        <?php
+                        $current = $attr_val('inputmode');
+                        $modes = array(
+                            ''        => __('— Por defecto —', 'haw'),
+                            'numeric' => __('Numérico (0–9)', 'haw'),
+                            'decimal' => __('Decimal (0–9 + .)', 'haw'),
+                            'tel'     => __('Teléfono', 'haw'),
+                            'email'   => __('Email', 'haw'),
+                            'url'     => __('URL', 'haw'),
+                            'search'  => __('Búsqueda', 'haw'),
+                        );
+                        foreach ($modes as $val => $label) {
+                            echo '<option value="' . esc_attr($val) . '" ' . selected($current, $val, false) . '>' . esc_html($label) . '</option>';
+                        }
+                        ?>
+                    </select>
+                    <p class="description"><?php esc_html_e('Qué teclado abre el móvil al enfocar el campo (inputmode).', 'haw'); ?></p>
+                </td>
+            </tr>
+            <tr class="haw-attr-row" data-types="text">
+                <th><label for="haw_attr_pattern"><?php esc_html_e('Patrón (avanzado)', 'haw'); ?></label></th>
+                <td>
+                    <input type="text" id="haw_attr_pattern" name="haw_attr_pattern" value="<?php echo esc_attr($attr_val('pattern')); ?>" class="regular-text code">
+                    <p class="description">
+                        <?php esc_html_e('Expresión regular que el valor debe cumplir (pattern). Ejemplos:', 'haw'); ?>
+                        <code>[0-9\-]+</code> <?php esc_html_e('solo números y guiones;', 'haw'); ?>
+                        <code>[A-Z]{3}[0-9]{4}</code> <?php esc_html_e('3 letras + 4 dígitos.', 'haw'); ?>
+                    </p>
                 </td>
             </tr>
         </table>
@@ -130,9 +227,15 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
         (function(){
             var typeSelect = document.getElementById('haw_field_type');
             var optionsRow = document.getElementById('haw_field_options_row');
+            var attrRows   = document.querySelectorAll('.haw-attr-row');
+
             function toggle(){
                 var v = typeSelect.value;
                 optionsRow.style.display = (v === 'radio' || v === 'select') ? '' : 'none';
+                attrRows.forEach(function(row){
+                    var types = (row.getAttribute('data-types') || '').split(' ');
+                    row.style.display = (types.indexOf(v) !== -1) ? '' : 'none';
+                });
             }
             typeSelect.addEventListener('change', toggle);
             toggle();
@@ -145,11 +248,11 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
     {
         $slug = $post->post_name;
         ?>
-        <p><?php esc_html_e('Define el slug que se usará como meta key del pedido.', 'haw'); ?></p>
+        <p><?php esc_html_e('Identificador único del campo (se usa internamente).', 'haw'); ?></p>
         <input type="text" id="haw_field_slug" name="haw_field_slug" value="<?php echo esc_attr($slug); ?>" style="width:100%;" pattern="[a-z0-9_]+" />
         <p class="description"><?php esc_html_e('Solo minúsculas, números y guiones bajos. Ej: fecha_deposito, costo_envio', 'haw'); ?></p>
         <?php if ($slug) : ?>
-            <p><strong><?php esc_html_e('Meta Key:', 'haw'); ?></strong> <code>_hpos_ardxoz_woo_<?php echo esc_html($slug); ?></code></p>
+            <p class="description" style="color:#a36400;"><?php esc_html_e('Cambiar el slug rompe el vínculo con los pedidos ya guardados bajo el slug anterior.', 'haw'); ?></p>
         <?php endif; ?>
         <?php
     }
@@ -164,14 +267,17 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
         if (!current_user_can('edit_post', $post_id)) {
             return;
         }
-        if (!isset($_POST['haw_field_nonce']) || !wp_verify_nonce($_POST['haw_field_nonce'], 'haw_field_save')) {
+        if (
+            !isset($_POST['haw_field_nonce'])
+            || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['haw_field_nonce'])), 'haw_field_save')
+        ) {
             return;
         }
 
-        // Tipo
+        // Tipo (allowlist)
         if (isset($_POST['haw_field_type'])) {
             $allowed = array('text', 'number', 'date', 'radio', 'select', 'textarea');
-            $type = sanitize_text_field($_POST['haw_field_type']);
+            $type = sanitize_text_field(wp_unslash($_POST['haw_field_type']));
             if (in_array($type, $allowed, true)) {
                 update_post_meta($post_id, '_haw_field_type', $type);
             }
@@ -179,22 +285,33 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
 
         // Opciones
         if (isset($_POST['haw_field_options'])) {
-            update_post_meta($post_id, '_haw_field_options', sanitize_textarea_field($_POST['haw_field_options']));
+            update_post_meta($post_id, '_haw_field_options', sanitize_textarea_field(wp_unslash($_POST['haw_field_options'])));
         }
 
-        // Atributos
-        if (isset($_POST['haw_field_attributes'])) {
-            update_post_meta($post_id, '_haw_field_attributes', sanitize_text_field($_POST['haw_field_attributes']));
+        // Atributos — se reciben como campos individuales y se recomponen en el string almacenado.
+        $parts = array();
+        foreach (hawm_allowed_attribute_names() as $attr_name) {
+            $post_key = 'haw_attr_' . $attr_name;
+            if (isset($_POST[$post_key])) {
+                $parts[$attr_name] = wp_unslash($_POST[$post_key]);
+            }
+        }
+        if (!empty($parts)) {
+            update_post_meta($post_id, '_haw_field_attributes', hawm_build_attributes_string($parts));
         }
 
         // Grupo
         if (isset($_POST['haw_field_group'])) {
-            update_post_meta($post_id, '_haw_field_group', sanitize_text_field($_POST['haw_field_group']));
+            update_post_meta($post_id, '_haw_field_group', sanitize_text_field(wp_unslash($_POST['haw_field_group'])));
         }
+
+        // Estado activo/inactivo — checkbox: presente='1', ausente='0'
+        $enabled_value = (isset($_POST['haw_field_enabled']) && $_POST['haw_field_enabled'] === '1') ? '1' : '0';
+        update_post_meta($post_id, '_haw_field_enabled', $enabled_value);
 
         // Slug (post_name)
         if (isset($_POST['haw_field_slug']) && $_POST['haw_field_slug'] !== '') {
-            $new_slug = preg_replace('/[^a-z0-9_]/', '', strtolower($_POST['haw_field_slug']));
+            $new_slug = preg_replace('/[^a-z0-9_]/', '', strtolower(wp_unslash($_POST['haw_field_slug'])));
             if ($new_slug && $new_slug !== $post->post_name) {
                 remove_action('save_post_haw_field', array($this, 'save_meta'), 10);
                 wp_update_post(array(
@@ -212,14 +329,27 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
     {
         $new = array();
         foreach ($columns as $key => $label) {
+            // Omitimos la columna "date" original: el orden por menu_order es más relevante aquí.
+            if ($key === 'date') {
+                continue;
+            }
             $new[$key] = $label;
             if ('title' === $key) {
-                $new['field_type']  = __('Tipo', 'haw');
-                $new['meta_key']    = __('Meta Key', 'haw');
-                $new['field_group'] = __('Grupo', 'haw');
+                $new['field_slug']     = __('Slug', 'haw');
+                $new['field_type']     = __('Tipo', 'haw');
+                $new['field_group']    = __('Grupo', 'haw');
+                $new['menu_order_col'] = __('Orden', 'haw');
+                $new['field_enabled']  = __('Estado', 'haw');
             }
         }
         return $new;
+    }
+
+    public function sortable_columns($columns)
+    {
+        $columns['menu_order_col'] = 'menu_order';
+        $columns['field_slug']     = 'name';
+        return $columns;
     }
 
     public function render_columns($column, $post_id)
@@ -227,14 +357,25 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
         if ('field_type' === $column) {
             echo esc_html(get_post_meta($post_id, '_haw_field_type', true) ?: 'text');
         }
-        if ('meta_key' === $column) {
+        if ('field_slug' === $column) {
             $slug = get_post_field('post_name', $post_id);
             if ($slug) {
-                echo '<code>_hpos_ardxoz_woo_' . esc_html($slug) . '</code>';
+                echo '<code>' . esc_html($slug) . '</code>';
             }
         }
         if ('field_group' === $column) {
             echo esc_html(get_post_meta($post_id, '_haw_field_group', true));
+        }
+        if ('menu_order_col' === $column) {
+            echo esc_html((string) get_post_field('menu_order', $post_id));
+        }
+        if ('field_enabled' === $column) {
+            $enabled_raw = get_post_meta($post_id, '_haw_field_enabled', true);
+            if ($enabled_raw === '0') {
+                echo '<span style="color:#999;">' . esc_html__('Inactivo', 'haw') . '</span>';
+            } else {
+                echo '<span style="color:#2271b1;">' . esc_html__('Activo', 'haw') . '</span>';
+            }
         }
     }
 
@@ -254,7 +395,23 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
         }
     }
 
-    // ── Seed: crear campos por defecto ─────────────────────
+    // ── Cache invalidation ─────────────────────────────────
+
+    public function invalidate_cache()
+    {
+        if (function_exists('hawm_invalidate_fields_cache')) {
+            hawm_invalidate_fields_cache();
+        }
+    }
+
+    public function maybe_invalidate_cache($post_id)
+    {
+        if (get_post_type($post_id) === 'haw_field') {
+            $this->invalidate_cache();
+        }
+    }
+
+    // ── Seed: restaurar campos por defecto (solo si no hay ninguno) ────
 
     public function render_seed_button()
     {
@@ -265,23 +422,24 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
 
         $count = wp_count_posts('haw_field');
         $has_fields = ($count && isset($count->publish) && $count->publish > 0);
+
+        // Ya hay campos creados: no mostrar el botón de restauración.
+        if ($has_fields) {
+            return;
+        }
         ?>
         <div class="notice notice-info" style="display:flex; align-items:center; gap:12px; padding:10px 15px;">
             <p style="margin:0; flex:1;">
-                <?php if ($has_fields) : ?>
-                    <strong><?php echo esc_html($count->publish); ?></strong> campo(s) registrado(s).
-                    Puedes restaurar los campos por defecto (no duplica existentes).
-                <?php else : ?>
-                    No hay campos creados. Crea los campos por defecto para comenzar.
-                <?php endif; ?>
+                <?php esc_html_e('No hay campos creados. Puedes restaurar los campos por defecto (Depósito, Retorno, Envío).', 'haw'); ?>
             </p>
-            <button type="button" id="hawm-seed-btn" class="button button-primary">
-                Crear campos por defecto
+            <button type="button" id="hawm-seed-btn" class="button button-primary" data-nonce="<?php echo esc_attr(wp_create_nonce('hawm_seed_fields')); ?>">
+                <?php esc_html_e('Crear campos por defecto', 'haw'); ?>
             </button>
         </div>
         <script>
         (function(){
             var btn = document.getElementById('hawm-seed-btn');
+            if (!btn) return;
             btn.addEventListener('click', function(){
                 btn.disabled = true;
                 btn.textContent = 'Creando...';
@@ -305,7 +463,7 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
                         }
                     }
                 };
-                xhr.send('action=hawm_seed_fields&_wpnonce=<?php echo wp_create_nonce('hawm_seed_fields'); ?>');
+                xhr.send('action=hawm_seed_fields&_wpnonce=' + encodeURIComponent(btn.getAttribute('data-nonce')));
             });
         })();
         </script>
@@ -321,21 +479,20 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
         }
 
         $defaults = array(
-            array('title' => 'Fecha de Depósito',  'slug' => 'fecha_deposito',    'type' => 'date',   'group' => 'Depósito', 'attrs' => '',                                          'opts' => '',              'order' => 1),
-            array('title' => 'Número de Depósito',  'slug' => 'numero_deposito',   'type' => 'text',   'group' => 'Depósito', 'attrs' => 'pattern="[0-9\\-]+" placeholder="0000-00000-0000"', 'opts' => '',    'order' => 2),
-            array('title' => 'Monto de Depósito',   'slug' => 'monto_deposito',    'type' => 'number', 'group' => 'Depósito', 'attrs' => 'step="0.01"',                                'opts' => '',              'order' => 3),
-            array('title' => 'Fecha de Retorno',    'slug' => 'fecha_retorno',     'type' => 'date',   'group' => 'Retorno',  'attrs' => '',                                          'opts' => '',              'order' => 4),
-            array('title' => 'Retorno',             'slug' => 'checkbox_retorno',  'type' => 'radio',  'group' => 'Retorno',  'attrs' => '',                                          'opts' => "si|Sí\nno|No",  'order' => 5),
-            array('title' => 'Costo de Retorno',    'slug' => 'costo_retorno',     'type' => 'number', 'group' => 'Retorno',  'attrs' => 'step="0.01"',                                'opts' => '',              'order' => 6),
-            array('title' => 'Costo de Envío',      'slug' => 'costo_envio',       'type' => 'number', 'group' => 'Envío',    'attrs' => 'step="0.01"',                                'opts' => '',              'order' => 7),
-            array('title' => 'Numero de Guía',      'slug' => 'numero_guia',       'type' => 'text',   'group' => 'Envío',    'attrs' => 'maxlength="30"',                             'opts' => '',              'order' => 8),
+            array('title' => 'Fecha de Depósito',  'slug' => 'fecha_deposito',    'type' => 'date',   'group' => 'Depósito', 'attrs' => '',                                                   'opts' => '',              'order' => 1),
+            array('title' => 'Número de Depósito',  'slug' => 'numero_deposito',   'type' => 'text',   'group' => 'Depósito', 'attrs' => 'pattern="[0-9\\-]+" placeholder="0000-00000-0000"', 'opts' => '',              'order' => 2),
+            array('title' => 'Monto de Depósito',   'slug' => 'monto_deposito',    'type' => 'number', 'group' => 'Depósito', 'attrs' => 'step="0.01"',                                        'opts' => '',              'order' => 3),
+            array('title' => 'Fecha de Retorno',    'slug' => 'fecha_retorno',     'type' => 'date',   'group' => 'Retorno',  'attrs' => '',                                                   'opts' => '',              'order' => 4),
+            array('title' => 'Retorno',             'slug' => 'checkbox_retorno',  'type' => 'radio',  'group' => 'Retorno',  'attrs' => '',                                                   'opts' => "si|Sí\nno|No",  'order' => 5),
+            array('title' => 'Costo de Retorno',    'slug' => 'costo_retorno',     'type' => 'number', 'group' => 'Retorno',  'attrs' => 'step="0.01"',                                        'opts' => '',              'order' => 6),
+            array('title' => 'Costo de Envío',      'slug' => 'costo_envio',       'type' => 'number', 'group' => 'Envío',    'attrs' => 'step="0.01"',                                        'opts' => '',              'order' => 7),
+            array('title' => 'Numero de Guía',      'slug' => 'numero_guia',       'type' => 'text',   'group' => 'Envío',    'attrs' => 'maxlength="30"',                                     'opts' => '',              'order' => 8),
         );
 
         $created = 0;
         $skipped = 0;
 
         foreach ($defaults as $field) {
-            // Verificar si ya existe un campo con ese slug
             $existing = get_posts(array(
                 'post_type'   => 'haw_field',
                 'name'        => $field['slug'],
@@ -359,10 +516,16 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
             if ($post_id && !is_wp_error($post_id)) {
                 update_post_meta($post_id, '_haw_field_type', $field['type']);
                 update_post_meta($post_id, '_haw_field_group', $field['group']);
-                update_post_meta($post_id, '_haw_field_attributes', $field['attrs']);
+                update_post_meta($post_id, '_haw_field_attributes', hawm_sanitize_attributes_string($field['attrs']));
                 update_post_meta($post_id, '_haw_field_options', $field['opts']);
+                update_post_meta($post_id, '_haw_field_enabled', '1');
                 $created++;
             }
+        }
+
+        // Invalida cache tras seed
+        if (function_exists('hawm_invalidate_fields_cache')) {
+            hawm_invalidate_fields_cache();
         }
 
         wp_send_json_success(array(

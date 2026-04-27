@@ -56,7 +56,14 @@ class HPOS_Ardxoz_Woo_Actions_Columns
         echo '<button type="button" class="button hawa-btn hawa-btn-print" data-print-url="' . esc_url($print_url) . '" title="Imprimir Nota"><span class="dashicons dashicons-printer"></span></button>';
 
         // En Curso (abre modal guía)
-        echo '<button type="button" class="button hawa-btn hawa-btn-encurso" data-order-id="' . esc_attr($order_id) . '">En curso</button>';
+        $shipping_method = $order->get_shipping_method();
+        $monto_actual = $order->get_meta('_hpos_ardxoz_woo_monto_efectivo', true);
+        echo '<button type="button" class="button hawa-btn hawa-btn-encurso" 
+                data-order-id="' . esc_attr($order_id) . '" 
+                data-order-number="' . esc_attr($order->get_order_number()) . '"
+                data-shipping-method="' . esc_attr($shipping_method) . '"
+                data-monto-efectivo="' . esc_attr($monto_actual) . '"
+              >En curso</button>';
 
         echo '</div>';
     }

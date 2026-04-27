@@ -20,12 +20,26 @@ class Order_Column
 
     public static function replace_column($columns)
     {
+        $user = wp_get_current_user();
+        $is_vendedor = in_array('vendedor', (array) $user->roles);
+
         $new = [];
         foreach ($columns as $key => $label) {
+            // Reemplazar número de pedido con nuestra columna custom
             if ($key === 'order_number') {
                 $new['haw_order'] = $label;
                 continue;
             }
+
+            // Si es vendedor, eliminar columnas que suelen contener enlaces automáticos de Woo
+            // No eliminamos 'order_status' ni 'order_total' aquí porque sirven de ancla para haw_status y order_payment
+            if ($is_vendedor) {
+                $hidden_for_vendedor = ['billing_address', 'wc_actions', 'order_date', 'shipping_address'];
+                if (in_array($key, $hidden_for_vendedor)) {
+                    continue;
+                }
+            }
+
             $new[$key] = $label;
         }
         return $new;
@@ -74,7 +88,12 @@ class Order_Column
         echo '<div style="line-height:1.4;">';
 
         // Número de pedido: link para admin/shop_manager, solo texto para vendedor
-        if (current_user_can('administrator') || current_user_can('shop_manager')) {
+        $user = wp_get_current_user();
+        $is_vendedor = in_array('vendedor', (array) $user->roles);
+
+        if ($is_vendedor) {
+            echo '<span style="font-weight:bold; font-size:13px;">#' . esc_html($order_number) . '</span>';
+        } elseif (current_user_can('administrator') || current_user_can('shop_manager')) {
             echo '<a href="' . esc_url($edit_url) . '" style="font-weight:bold; font-size:13px;">#' . esc_html($order_number) . '</a>';
         } else {
             echo '<span style="font-weight:bold; font-size:13px;">#' . esc_html($order_number) . '</span>';

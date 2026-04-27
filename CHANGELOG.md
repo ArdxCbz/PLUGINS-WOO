@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## v2.0.0
+- **feat(plugins):** Actualización mayor (Major) de versiones para complementos HPOS principales.
+- **feat(actions):** Se incrementó la versión de HPOS Ardxoz Woo Actions a 2.0.
+- **feat(demv):** Se incrementó la versión de HPOS Ardxoz Woo DEMV a 3.0.
+- **feat(metaorder):** Se incrementó la versión de HPOS Ardxoz Woo MetaOrder a 4.0.
+
 ## v1.3.0
 - **feat(woo):** Nueva lógica de promoción de Cajas de Regalo automáticas basada en umbral de precio (350 Bs).
 - **feat(woo):** Prorrateo inteligente de precios en cajas manuales cuando se aplica la promoción.

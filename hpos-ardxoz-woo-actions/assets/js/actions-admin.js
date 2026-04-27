@@ -93,10 +93,20 @@ document.addEventListener('DOMContentLoaded', function () {
             } else if (status === 'en-curso') {
                 document.getElementById('hawa-modal-customer-name').textContent = d.customer_name || '';
                 document.querySelector('#hawa-modal-encurso input[name="order_id"]').value = orderId;
-                document.querySelector('#hawa-modal-encurso input[name="postcode"]').value = d.shipping_postcode || '';
+                
+                // Lógica condicional: SUECIA o CBS
+                var isSpecial = method.indexOf('SUECIA') !== -1 || method.indexOf('CBS') !== -1;
+                var currentPostcode = d.shipping_postcode || '';
+                
+                document.querySelector('#hawa-modal-encurso input[name="postcode"]').value = (isSpecial && !currentPostcode) ? d.order_number : currentPostcode;
+                
                 if (d.costo_courier) {
                     document.querySelector('#hawa-modal-encurso input[name="costo_courier"]').value = d.costo_courier;
                 }
+                
+                // Monto Efectivo
+                document.querySelector('#hawa-modal-encurso input[name="monto_efectivo"]').value = d.monto_efectivo || '';
+                
                 showModal('hawa-modal-encurso');
             }
         });
@@ -166,11 +176,17 @@ document.addEventListener('DOMContentLoaded', function () {
             var orderId = document.querySelector('#hawa-modal-encurso input[name="order_id"]').value;
             var postcode = document.querySelector('#hawa-modal-encurso input[name="postcode"]').value;
             var costo = document.querySelector('#hawa-modal-encurso input[name="costo_courier"]').value;
+            var monto = document.querySelector('#hawa-modal-encurso input[name="monto_efectivo"]').value;
 
             if (!postcode) { alert('Ingrese la guía'); return; }
 
             setButtonLoading(this, true);
-            ajaxPost('hawa_save_encurso', { order_id: orderId, postcode: postcode, costo_courier: costo }, function (res) {
+            ajaxPost('hawa_save_encurso', { 
+                order_id: orderId, 
+                postcode: postcode, 
+                costo_courier: costo,
+                monto_efectivo: monto
+            }, function (res) {
                 setButtonLoading(btnEnCurso, false);
                 if (res.success) {
                     hideModal('hawa-modal-encurso');

@@ -4,10 +4,42 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Obtiene los campos de pedido desde el CPT haw_field.
- * Si no hay campos publicados, retorna los campos por defecto (legacy).
+ * Invalida el cache de la definición de campos.
+ * No toca ningún meta de pedido ni elimina datos guardados.
  */
-function hpos_ardxoz_woo_get_order_fields(WC_Order $order)
+function hawm_invalidate_fields_cache()
+{
+    delete_option('hawm_fields_def_cache');
+    wp_cache_delete('hawm_fields_def', 'hawm');
+}
+
+/**
+ * Devuelve la definición cacheada de campos (sin valores de pedido).
+ * Primero mira object cache; después la option (autoload=false); si ninguna existe, compila del CPT.
+ */
+function hawm_get_fields_definition()
+{
+    $cached = wp_cache_get('hawm_fields_def', 'hawm');
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $def = get_option('hawm_fields_def_cache', null);
+    if (!is_array($def)) {
+        $def = hawm_build_fields_definition();
+        update_option('hawm_fields_def_cache', $def, false); // autoload=false
+    }
+
+    wp_cache_set('hawm_fields_def', $def, 'hawm', HOUR_IN_SECONDS);
+    return $def;
+}
+
+/**
+ * Compila la definición desde el CPT haw_field.
+ * Excluye únicamente campos con _haw_field_enabled === '0' (los pre-existentes sin esta meta cuentan como activos).
+ * Los metas en pedidos NO se tocan nunca desde esta función.
+ */
+function hawm_build_fields_definition()
 {
     $posts = get_posts(array(
         'post_type'      => 'haw_field',
@@ -17,41 +49,34 @@ function hpos_ardxoz_woo_get_order_fields(WC_Order $order)
         'order'          => 'ASC',
     ));
 
-    // Si hay campos en el CPT, usarlos
-    if (!empty($posts)) {
-        return hpos_ardxoz_woo_build_fields_from_cpt($posts, $order);
+    if (empty($posts)) {
+        return array();
     }
 
-    // Fallback: campos hardcodeados originales
-    return hpos_ardxoz_woo_get_default_fields($order);
-}
-
-/**
- * Construye el array de campos desde los posts del CPT haw_field.
- */
-function hpos_ardxoz_woo_build_fields_from_cpt(array $posts, WC_Order $order)
-{
-    $fields = array();
-
+    $def = array();
     foreach ($posts as $post) {
-        $slug       = $post->post_name;
-        $meta_key   = '_hpos_ardxoz_woo_' . $slug;
-        $type       = get_post_meta($post->ID, '_haw_field_type', true) ?: 'text';
-        $attributes = get_post_meta($post->ID, '_haw_field_attributes', true) ?: '';
-        $group      = get_post_meta($post->ID, '_haw_field_group', true) ?: '';
+        $enabled_raw = get_post_meta($post->ID, '_haw_field_enabled', true);
+        // Solo se omite si está explícitamente inactivo. Los campos legacy sin la meta permanecen visibles.
+        if ($enabled_raw === '0') {
+            continue;
+        }
+
+        $slug        = $post->post_name;
+        $meta_key    = '_hpos_ardxoz_woo_' . $slug;
+        $type        = get_post_meta($post->ID, '_haw_field_type', true) ?: 'text';
+        $attributes  = get_post_meta($post->ID, '_haw_field_attributes', true) ?: '';
+        $group       = get_post_meta($post->ID, '_haw_field_group', true) ?: '';
         $options_raw = get_post_meta($post->ID, '_haw_field_options', true) ?: '';
 
-        $field = array(
+        $entry = array(
             'label'      => $post->post_title,
             'type'       => $type,
             'name'       => 'hpos_ardxoz_woo_' . $slug,
             'meta_key'   => $meta_key,
-            'value'      => $order->get_meta($meta_key, true),
             'attributes' => $attributes,
             'group'      => $group,
         );
 
-        // Parsear opciones para radio/select
         if (in_array($type, array('radio', 'select'), true) && $options_raw) {
             $options = array();
             $lines = explode("\n", $options_raw);
@@ -67,12 +92,32 @@ function hpos_ardxoz_woo_build_fields_from_cpt(array $posts, WC_Order $order)
                     $options[$line] = $line;
                 }
             }
-            $field['options'] = $options;
+            $entry['options'] = $options;
         }
 
-        $fields[$slug] = $field;
+        $def[$slug] = $entry;
     }
 
+    return $def;
+}
+
+/**
+ * Obtiene los campos con el valor actual del pedido adjunto.
+ * Si el CPT está vacío, cae al fallback hardcodeado (preserva compatibilidad con datos ya guardados).
+ */
+function hpos_ardxoz_woo_get_order_fields(WC_Order $order)
+{
+    $def = hawm_get_fields_definition();
+
+    if (empty($def)) {
+        return hpos_ardxoz_woo_get_default_fields($order);
+    }
+
+    $fields = array();
+    foreach ($def as $slug => $entry) {
+        $entry['value']  = $order->get_meta($entry['meta_key'], true);
+        $fields[$slug]   = $entry;
+    }
     return $fields;
 }
 
@@ -160,7 +205,7 @@ function hpos_ardxoz_woo_get_default_fields(WC_Order $order)
 
 /**
  * Renderiza los campos en el metabox del pedido.
- * Agrupa visualmente por el campo 'group'.
+ * Los atributos se sanitizan siempre en salida (defensa en profundidad contra datos legacy).
  */
 function hpos_ardxoz_woo_render_fields($fields)
 {
@@ -171,7 +216,6 @@ function hpos_ardxoz_woo_render_fields($fields)
     foreach ($fields as $key => $field) {
         $group = isset($field['group']) ? $field['group'] : '';
 
-        // Separador entre grupos
         if ($group && $group !== $current_group) {
             if ($current_group !== null) {
                 echo '<hr>';
@@ -182,8 +226,10 @@ function hpos_ardxoz_woo_render_fields($fields)
 
         echo '<p><label><strong>' . esc_html($field['label']) . '</strong><br>';
 
-        $type = $field['type'];
-        $attributes = !empty($field['attributes']) ? ' ' . $field['attributes'] : '';
+        $type       = $field['type'];
+        $raw_attrs  = isset($field['attributes']) ? $field['attributes'] : '';
+        $attrs_safe = hawm_sanitize_attributes_string($raw_attrs);
+        $attributes = ($attrs_safe !== '') ? ' ' . $attrs_safe : '';
 
         if ($type === 'radio' && !empty($field['options'])) {
             foreach ($field['options'] as $value => $label) {

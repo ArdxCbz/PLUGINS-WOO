@@ -91,8 +91,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
         e.preventDefault();
         var orderId = btn.getAttribute('data-order-id');
+        var orderNum = btn.getAttribute('data-order-number');
+        var shipMethod = (btn.getAttribute('data-shipping-method') || '').toUpperCase();
+        var montoActual = btn.getAttribute('data-monto-efectivo');
+
         document.getElementById('hawa-guia-order-id').value = orderId;
-        document.getElementById('hawa-guia-postcode').value = '';
+        
+        // Lógica condicional: SUECIA o CBS (Solo Método de Envío)
+        var isSpecial = shipMethod.includes('SUECIA') || shipMethod.includes('CBS');
+        
+        var inputGuia = document.getElementById('hawa-guia-postcode');
+        inputGuia.value = isSpecial ? orderNum : '';
+        inputGuia.readOnly = isSpecial;
+        inputGuia.style.backgroundColor = isSpecial ? '#f0f0f0' : '';
+
+        // Bloqueo de Monto Efectivo si ya tiene valor
+        var inputMonto = document.getElementById('hawa-guia-monto-efectivo');
+        inputMonto.value = montoActual || '';
+        inputMonto.readOnly = !!montoActual;
+        inputMonto.style.backgroundColor = montoActual ? '#f0f0f0' : '';
+
         document.getElementById('hawa-modal-guia').classList.add('show');
     });
 
@@ -104,6 +122,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var orderId = document.getElementById('hawa-guia-order-id').value;
             var postcode = document.getElementById('hawa-guia-postcode').value;
             var costo = document.getElementById('hawa-guia-costo').value;
+            var montoEfectivo = document.getElementById('hawa-guia-monto-efectivo').value;
 
             if (!postcode) {
                 alert('Ingrese el número de guía');
@@ -116,7 +135,8 @@ document.addEventListener('DOMContentLoaded', function () {
             ajaxPost('hawa_vendedor_guia', {
                 order_id: orderId,
                 postcode: postcode,
-                costo_courier: costo
+                costo_courier: costo,
+                monto_efectivo: montoEfectivo
             }, function (res) {
                 saveGuia.disabled = false;
                 saveGuia.textContent = 'Guardar';
