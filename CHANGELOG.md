@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v2.0.1
+- **feat(print-note):** Se incrementó la versión de HPOS Ardxoz Woo Print Note a 3.1.
+- **fix(print-note):** Rediseño y alineación del botón de impresión usando iconos nativos de WooCommerce y estilos de Dashicons.
+
 ## v2.0.0
 - **feat(plugins):** Actualización mayor (Major) de versiones para complementos HPOS principales.
 - **feat(actions):** Se incrementó la versión de HPOS Ardxoz Woo Actions a 2.0.

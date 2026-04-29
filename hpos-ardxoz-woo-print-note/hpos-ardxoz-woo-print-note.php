@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HPOS Ardxoz Woo Print Note
  * Description: Imprime notas de entrega compactas para pedidos de WooCommerce en impresoras térmicas (80mm) con soporte HPOS.
- * Version: 3.0
+ * Version: 3.1
  * Author: Ardxoz
  */
 

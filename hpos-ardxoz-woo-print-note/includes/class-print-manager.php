@@ -11,19 +11,66 @@ class HPOS_Ardxoz_Woo_Print_Manager
         // Manejador AJAX para generar la vista de impresión
         add_action('wp_ajax_haw_print_note', [__CLASS__, 'handle_print_request']);
 
-        // Darle un toque de estilo al botón nativamente en el admin
-        add_action('admin_head', function () {
-            echo '<style>.imprimir_nota.button{background:#0073aa;color:#fff;border-color:#006799}.imprimir_nota.button:hover{background:#006799}</style>';
-        });
+        // Inyectar el icono usando la fuente nativa de WooCommerce, alineado
+        // con el grid 2em x 2em que define hpos-ardxoz-woo-status.
+        add_action('admin_enqueue_scripts', [__CLASS__, 'enqueue_button_styles'], 25);
+    }
+
+    public static function enqueue_button_styles()
+    {
+        wp_enqueue_style('woocommerce_admin_styles');
+        wp_enqueue_style('dashicons');
+
+        // Selector con doble clase: mayor especificidad que las reglas base de
+        // woocommerce-delivery-notes y aislado bajo .imprimir_nota para no
+        // afectar a sus modificadores (.invoice, .deliverynote, etc.).
+        $css = '
+            .type-shop_order .column-order_actions .print-preview-button.imprimir_nota,
+            .type-shop_order .column-wc_actions .print-preview-button.imprimir_nota {
+                display: inline-block !important;
+                vertical-align: top !important;
+                position: relative !important;
+                height: 2em !important;
+                width: 2em !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                overflow: hidden !important;
+                box-sizing: border-box !important;
+            }
+            .type-shop_order .column-order_actions .print-preview-button.imprimir_nota::before,
+            .type-shop_order .column-wc_actions .print-preview-button.imprimir_nota::before {
+                font-family: dashicons;
+                font-weight: normal;
+                font-variant: normal;
+                font-style: normal;
+                text-transform: none;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                text-align: center;
+                text-indent: 0;
+                line-height: 2em;
+                font-size: 18px;
+                content: "\f193";
+            }
+        ';
+        wp_add_inline_style('woocommerce_admin_styles', $css);
     }
 
     public static function add_print_button($order)
     {
         $print_url = admin_url('admin-ajax.php?action=haw_print_note&order_id=' . $order->get_id());
+        $label     = __('Imprimir Nota de Entrega', 'haw');
 
-        echo '<a class="button imprimir_nota" href="' . esc_url($print_url) . '" target="_blank" title="Imprimir Nota de Entrega" style="padding: 0 5px; display: inline-flex; align-items: center; justify-content: center;">
-                <span class="dashicons dashicons-printer"></span>
-              </a>';
+        printf(
+            '<a class="button tips print-preview-button imprimir_nota" href="%1$s" target="_blank" title="%2$s" aria-label="%2$s" data-tip="%2$s"></a>',
+            esc_url($print_url),
+            esc_attr($label)
+        );
     }
 
     public static function handle_print_request()
