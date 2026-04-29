@@ -63,6 +63,7 @@ class HPOS_Ardxoz_Woo_DEMV_Query
         $deposit_search  = trim($filters['deposit_search'] ?? '');
         $no_deposit      = !empty($filters['no_deposit']);
         $billing_state_f = $filters['billing_state'] ?? 'all';
+        $sucursal_filter = strtoupper(trim($filters['sucursal'] ?? 'all'));
         $search          = trim($filters['search'] ?? '');
 
         // Soporte multi-término: separar búsqueda por espacios/comas
@@ -77,6 +78,7 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                           || $deposit_search !== ''
                           || $no_deposit
                           || ($billing_state_f && $billing_state_f !== 'all')
+                          || ($sucursal_filter && $sucursal_filter !== 'ALL')
                           || !empty($search_terms);
 
         if ($needs_post_filter && !empty($order_ids)) {
@@ -106,6 +108,13 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                 // Filtro: departamento (billing_state)
                 if ($billing_state_f && $billing_state_f !== 'all') {
                     if ($order->get_billing_state() !== $billing_state_f) {
+                        continue;
+                    }
+                }
+
+                // Filtro: sucursal (atributo de producto pa_sucursal)
+                if ($sucursal_filter && $sucursal_filter !== 'ALL') {
+                    if (!in_array($sucursal_filter, self::get_order_sucursales($order), true)) {
                         continue;
                     }
                 }
@@ -395,5 +404,24 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                 ORDER BY m.meta_value";
 
         return $wpdb->get_col($wpdb->prepare($sql, $start, $end, $billing_state));
+    }
+
+    /**
+     * Devuelve las sucursales (en mayúsculas) presentes en los productos del pedido,
+     * leyendo el atributo de producto `pa_sucursal`.
+     *
+     * @param WC_Order $order
+     * @return string[]
+     */
+    public static function get_order_sucursales($order)
+    {
+        $sucursales = array();
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if (!$product) continue;
+            $suc = strtoupper(trim((string) $product->get_attribute('pa_sucursal')));
+            if ($suc !== '') $sucursales[$suc] = true;
+        }
+        return array_keys($sucursales);
     }
 }

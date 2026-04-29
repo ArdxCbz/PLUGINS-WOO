@@ -182,7 +182,7 @@
 .hawd-col-payment  { width: 100px; }
 .hawd-col-state    { width: 80px; }
 .hawd-col-shipping { width: 80px; }
-.hawd-col-cost     { width: 65px; }
+.hawd-col-cost     { width: 90px; }
 .hawd-col-fdeposit { width: 80px; }
 .hawd-col-ndeposit { width: 90px; }
 .hawd-col-total    { width: 80px; }
@@ -631,3 +631,46 @@
     background: #fdf2f2;
 }
 .hawd-rp-cancelar:hover { background: #c0392b; color: #fff; }
+
+/* ── Inline edit: Costo de Envío ────────────────── */
+.hawd-cell-costo {
+    padding: 4px 6px !important;
+}
+.hawd-costo-input {
+    width: 100%;
+    max-width: 80px;
+    height: 26px;
+    padding: 0 6px;
+    font-size: 12px;
+    text-align: right;
+    border: 1px solid #c3c4c7;
+    border-radius: 3px;
+    background: #fff;
+    transition: border-color .15s, background-color .15s, box-shadow .15s;
+}
+.hawd-costo-input:hover {
+    border-color: #2271b1;
+}
+.hawd-costo-input:focus {
+    border-color: #2271b1;
+    outline: 2px solid transparent;
+    box-shadow: 0 0 0 1px #2271b1;
+}
+.hawd-input-saving {
+    background: #fff8e1;
+    border-color: #d4a017;
+}
+.hawd-input-saved {
+    background: #ecf7ed;
+    border-color: #196b32;
+}
+.hawd-input-error {
+    background: #fdecea;
+    border-color: #c0392b;
+}
+/* Totales del resumen */
+.hawd-sel-order-total,
+.hawd-sel-shipping {
+    font-weight: 600;
+    color: #1d2327;
+}

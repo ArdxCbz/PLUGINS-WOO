@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HPOS Ardxoz Woo DEMV
  * Description: Gestión de depósitos bancarios, búsqueda por guía y auto-fill de envío. Compatible HPOS.
- * Version:     3.0
+ * Version:     3.1
  * Author:      Ardxoz
  * Requires Plugins: woocommerce
  */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 
 define('HAWD_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HAWD_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('HAWD_VERSION', '3.0');
+define('HAWD_VERSION', '3.1');
 
 use Automattic\WooCommerce\Utilities\FeaturesUtil;
 

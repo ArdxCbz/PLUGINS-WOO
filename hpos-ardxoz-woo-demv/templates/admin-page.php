@@ -6,6 +6,7 @@
  *   $shipping_methods  - array de títulos de métodos de envío (últimos 6 meses)
  *   $payment_methods   - array de objetos {payment_method, payment_method_title} (últimos 6 meses, unificados)
  *   $billing_states    - array de objetos {code, name}
+ *   $sucursales        - array de strings (sucursales disponibles)
  *   $order_statuses    - array asociativo slug => label
  *   $current_year      - año actual
  */
@@ -64,6 +65,19 @@ if (!defined('ABSPATH')) {
                     <?php foreach ($billing_states as $st): ?>
                         <option value="<?php echo esc_attr($st->code); ?>">
                             <?php echo esc_html($st->name); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <!-- Sucursal (atributo de producto pa_sucursal) -->
+            <div class="hawd-filter-group">
+                <label for="hawd_sucursal">Sucursal</label>
+                <select id="hawd_sucursal" class="hawd-filter">
+                    <option value="all">Todas</option>
+                    <?php foreach ($sucursales as $suc): ?>
+                        <option value="<?php echo esc_attr($suc); ?>">
+                            <?php echo esc_html($suc); ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -158,6 +172,7 @@ if (!defined('ABSPATH')) {
                 <input type="hidden" name="payment_method" id="hawd_csv_payment">
                 <input type="hidden" name="shipping_method" id="hawd_csv_shipping">
                 <input type="hidden" name="billing_state" id="hawd_csv_billing_state">
+                <input type="hidden" name="sucursal" id="hawd_csv_sucursal">
                 <input type="hidden" name="deposit" id="hawd_csv_deposit">
                 <input type="hidden" name="deposit_search" id="hawd_csv_deposit_search">
                 <input type="hidden" name="no_deposit" id="hawd_csv_no_deposit">

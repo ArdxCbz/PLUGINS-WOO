@@ -72,6 +72,7 @@ jQuery(function ($) {
             month: $('#hawd_month').val(),
             status: $('#hawd_status').val(),
             billing_state: $('#hawd_billing_state').val(),
+            sucursal: $('#hawd_sucursal').val() || 'all',
             shipping_method: $('#hawd_shipping').val(),
             payment_method: $('#hawd_payment').val(),
             deposit: $('#hawd_deposit').val() || 'all',
@@ -92,6 +93,7 @@ jQuery(function ($) {
         $('#hawd_csv_month').val(f.month);
         $('#hawd_csv_status').val(f.status);
         $('#hawd_csv_billing_state').val(f.billing_state);
+        $('#hawd_csv_sucursal').val(f.sucursal);
         $('#hawd_csv_payment').val(f.payment_method);
         $('#hawd_csv_shipping').val(f.shipping_method);
         $('#hawd_csv_deposit').val(f.deposit);
@@ -224,7 +226,7 @@ jQuery(function ($) {
                 '<td>' + esc(r.payment_method_title || '') + '</td>' +
                 '<td>' + esc(r.billing_state_full || '') + '</td>' +
                 '<td>' + esc(r.shipping_method_title || '') + '</td>' +
-                '<td>' + formatMoney(r.costo_envio) + '</td>' +
+                '<td class="hawd-cell-costo">' + costoEnvioInput(r) + '</td>' +
                 '<td>' + emptyCell(r.fecha_deposito) + '</td>' +
                 '<td>' + emptyCell(r.numero_deposito) + '</td>' +
                 '<td>' + fmtNum(r.order_total) + '</td>' +
@@ -282,16 +284,22 @@ jQuery(function ($) {
         var selCount = selected.length;
 
         var selRows = getSelectedRows();
-        var selTotal = 0;
+        var sumDepositado = 0;
+        var sumOrderTotal = 0;
+        var sumCostoEnvio = 0;
         selRows.forEach(function (r) {
-            selTotal += r.importe_calculado || 0;
+            sumDepositado += parseFloat(r.importe_calculado) || 0;
+            sumOrderTotal += parseFloat(r.order_total) || 0;
+            sumCostoEnvio += parseFloat(r.costo_envio) || 0;
         });
 
         var html = '<strong>' + total + '</strong> pedidos';
 
         if (selCount > 0) {
             html += ' &nbsp;|&nbsp; <span class="hawd-sel-count">' + selCount + ' seleccionados</span>';
-            html += ' &nbsp;|&nbsp; Total calculado: <span class="hawd-sel-total">' + fmtNum(selTotal) + ' Bs</span>';
+            html += ' &nbsp;|&nbsp; Total depositado: <span class="hawd-sel-total">' + fmtNum(sumDepositado) + ' Bs</span>';
+            html += ' &nbsp;|&nbsp; Total: <span class="hawd-sel-order-total">' + fmtNum(sumOrderTotal) + ' Bs</span>';
+            html += ' &nbsp;|&nbsp; Total costo de envío: <span class="hawd-sel-shipping">' + fmtNum(sumCostoEnvio) + ' Bs</span>';
         }
 
         $('#hawd_summary').html(html);
@@ -601,4 +609,95 @@ jQuery(function ($) {
         if (!val || val === '') return '<span class="hawd-empty">—</span>';
         return esc(val);
     }
+
+    // ═══════════════════════════════════════════════
+    //  INLINE EDIT: Costo de Envío
+    // ═══════════════════════════════════════════════
+
+    function costoEnvioInput(r) {
+        var n = parseFloat(r.costo_envio);
+        var val = isNaN(n) ? '' : String(n);
+        return '<input type="number" step="0.01" min="0" ' +
+               'class="hawd-costo-input" ' +
+               'data-id="' + r.id + '" ' +
+               'data-original="' + escAttr(val) + '" ' +
+               'value="' + escAttr(val) + '" ' +
+               'placeholder="—" ' +
+               'inputmode="decimal" ' +
+               'autocomplete="off">';
+    }
+
+    // No togglear el checkbox de fila al interactuar con el input
+    $(document).on('click mousedown', '.hawd-costo-input', function (e) {
+        e.stopPropagation();
+    });
+
+    // Enter confirma (dispara blur)
+    $(document).on('keydown', '.hawd-costo-input', function (e) {
+        if (e.which === 13) {
+            e.preventDefault();
+            $(this).blur();
+        } else if (e.which === 27) {
+            // Escape: revertir
+            $(this).val($(this).attr('data-original')).blur();
+        }
+    });
+
+    // Guardar al perder foco si cambió
+    $(document).on('change blur', '.hawd-costo-input', function () {
+        var $inp = $(this);
+        if ($inp.data('saving')) return;
+
+        var orig = $inp.attr('data-original') || '';
+        var val  = $.trim($inp.val());
+
+        // Normalizar número (acepta vacío)
+        var normalized = '';
+        if (val !== '') {
+            var n = parseFloat(val.replace(',', '.'));
+            if (isNaN(n) || n < 0) {
+                $inp.addClass('hawd-input-error');
+                $inp.val(orig);
+                setTimeout(function () { $inp.removeClass('hawd-input-error'); }, 1200);
+                return;
+            }
+            normalized = String(n);
+        }
+
+        if (normalized === orig) return; // sin cambios
+
+        $inp.data('saving', true).prop('disabled', true).addClass('hawd-input-saving');
+
+        $.post(P.ajax_url, {
+            action: 'hawd_update_costo_envio',
+            nonce: P.nonce,
+            order_id: $inp.attr('data-id'),
+            costo_envio: normalized
+        })
+        .done(function (res) {
+            if (res.success && res.data && res.data.row) {
+                var newRow = res.data.row;
+                // Actualizar tableData
+                tableData = tableData.map(function (r) {
+                    return r.id === newRow.id ? newRow : r;
+                });
+                $inp.attr('data-original', String(parseFloat(newRow.costo_envio) || 0));
+                $inp.removeClass('hawd-input-saving').addClass('hawd-input-saved');
+                setTimeout(function () { $inp.removeClass('hawd-input-saved'); }, 1000);
+                updateSummary();
+            } else {
+                $inp.removeClass('hawd-input-saving').addClass('hawd-input-error');
+                $inp.val(orig);
+                setTimeout(function () { $inp.removeClass('hawd-input-error'); }, 1500);
+            }
+        })
+        .fail(function () {
+            $inp.removeClass('hawd-input-saving').addClass('hawd-input-error');
+            $inp.val(orig);
+            setTimeout(function () { $inp.removeClass('hawd-input-error'); }, 1500);
+        })
+        .always(function () {
+            $inp.data('saving', false).prop('disabled', false);
+        });
+    });
 });

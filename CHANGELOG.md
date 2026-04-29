@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v2.0.2
+- **feat(demv):** Se incrementó la versión de HPOS Ardxoz Woo DEMV a 3.1.
+- **feat(demv):** Se añadió filtro por sucursal (`pa_sucursal`) en la vista de depósitos.
+- **feat(demv):** Se implementó edición en línea para el costo de envío con recálculo automático del monto de depósito.
+
 ## v2.0.1
 - **feat(print-note):** Se incrementó la versión de HPOS Ardxoz Woo Print Note a 3.1.
 - **fix(print-note):** Rediseño y alineación del botón de impresión usando iconos nativos de WooCommerce y estilos de Dashicons.

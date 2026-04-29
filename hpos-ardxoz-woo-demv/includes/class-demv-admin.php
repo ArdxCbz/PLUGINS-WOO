@@ -165,6 +165,7 @@ class HPOS_Ardxoz_Woo_DEMV_Admin
         $shipping_methods = HPOS_Ardxoz_Woo_DEMV_Query::get_shipping_methods();
         $payment_methods  = HPOS_Ardxoz_Woo_DEMV_Query::get_payment_methods();
         $billing_states   = HPOS_Ardxoz_Woo_DEMV_Query::get_billing_states();
+        $sucursales       = HPOS_Ardxoz_Woo_DEMV_Config::SUCURSALES;
         $order_statuses   = wc_get_order_statuses();
         $current_year     = wp_date('Y');
 

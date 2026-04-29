@@ -18,6 +18,7 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
         add_action('wp_ajax_hawd_filter_orders', array(__CLASS__, 'filter_orders'));
         add_action('wp_ajax_hawd_complete_deposit', array(__CLASS__, 'complete_deposit'));
         add_action('wp_ajax_hawd_get_deposit_numbers', array(__CLASS__, 'get_deposit_numbers'));
+        add_action('wp_ajax_hawd_update_costo_envio', array(__CLASS__, 'update_costo_envio'));
         add_action('admin_post_hawd_export_csv', array(__CLASS__, 'export_csv'));
     }
 
@@ -40,6 +41,7 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
             'payment_method'  => sanitize_text_field($_POST['payment_method'] ?? 'all'),
             'shipping_method' => sanitize_text_field($_POST['shipping_method'] ?? 'all'),
             'billing_state'   => sanitize_text_field($_POST['billing_state'] ?? 'all'),
+            'sucursal'        => sanitize_text_field($_POST['sucursal'] ?? 'all'),
             'deposit'         => sanitize_text_field($_POST['deposit'] ?? 'all'),
             'deposit_search'  => sanitize_text_field($_POST['deposit_search'] ?? ''),
             'no_deposit'      => (($_POST['no_deposit'] ?? '') === '1'),
@@ -194,6 +196,7 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
             'payment_method'  => sanitize_text_field($_POST['payment_method'] ?? 'all'),
             'shipping_method' => sanitize_text_field($_POST['shipping_method'] ?? 'all'),
             'billing_state'   => sanitize_text_field($_POST['billing_state'] ?? 'all'),
+            'sucursal'        => sanitize_text_field($_POST['sucursal'] ?? 'all'),
             'deposit'         => sanitize_text_field($_POST['deposit'] ?? 'all'),
             'deposit_search'  => sanitize_text_field($_POST['deposit_search'] ?? ''),
             'no_deposit'      => (($_POST['no_deposit'] ?? '') === '1'),
@@ -270,6 +273,62 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
             return "'" . $v;
         }
         return $v;
+    }
+
+    /**
+     * AJAX: Editar inline el costo de envío de un pedido.
+     * Recibe: order_id, costo_envio
+     * Guarda en _hpos_ardxoz_woo_costo_envio. Si el pedido ya tiene depósito
+     * registrado (numero_deposito), recalcula y actualiza monto_deposito.
+     */
+    public static function update_costo_envio()
+    {
+        check_ajax_referer('hawd_page_nonce', 'nonce');
+
+        if (!current_user_can('manage_woocommerce')) {
+            wp_send_json_error(array('message' => 'No autorizado'));
+        }
+
+        $order_id = intval($_POST['order_id'] ?? 0);
+        $raw      = (string) ($_POST['costo_envio'] ?? '');
+        // Acepta "12,50" o "12.50"
+        $normal   = str_replace(',', '.', trim($raw));
+
+        if (!$order_id) {
+            wp_send_json_error(array('message' => 'Pedido inválido'));
+        }
+        if ($normal !== '' && !is_numeric($normal)) {
+            wp_send_json_error(array('message' => 'Costo inválido'));
+        }
+        if ($normal !== '' && floatval($normal) < 0) {
+            wp_send_json_error(array('message' => 'El costo no puede ser negativo'));
+        }
+
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            wp_send_json_error(array('message' => 'Pedido no encontrado'));
+        }
+
+        $valor = ($normal === '') ? '' : (string) floatval($normal);
+
+        $order->update_meta_data('_hpos_ardxoz_woo_costo_envio', $valor);
+
+        // Si ya tiene depósito registrado, recalcular monto_deposito
+        $tiene_deposito = (string) HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_numero_deposito');
+        if ($tiene_deposito !== '') {
+            $importe = HPOS_Ardxoz_Woo_DEMV_Calculator::calcular($order);
+            $order->update_meta_data('_hpos_ardxoz_woo_monto_deposito', $importe);
+        }
+
+        $order->save();
+
+        // Devolver datos actualizados de la fila para refrescar el frontend
+        $row = HPOS_Ardxoz_Woo_DEMV_Query::build_row_data($order);
+
+        wp_send_json_success(array(
+            'message' => 'Costo de envío actualizado',
+            'row'     => $row,
+        ));
     }
 
     /**
