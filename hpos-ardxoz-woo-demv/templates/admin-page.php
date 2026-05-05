@@ -31,46 +31,47 @@ if (!defined('ABSPATH')) {
                 </select>
             </div>
 
-            <!-- Mes -->
+            <!-- Mes (multi-select con checkboxes) -->
             <div class="hawd-filter-group">
-                <label for="hawd_month">Mes</label>
-                <select id="hawd_month" class="hawd-filter">
-                    <option value="all">Todos</option>
-                    <?php for ($m = 1; $m <= 12; $m++): ?>
-                        <option value="<?php echo $m; ?>">
-                            <?php echo date_i18n('F', mktime(0, 0, 0, $m, 1)); ?>
-                        </option>
-                    <?php endfor; ?>
-                </select>
+                <label>Mes</label>
+                <div class="hawd-multi" data-name="month" data-placeholder="Todos">
+                    <button type="button" class="hawd-multi-toggle">Todos</button>
+                    <div class="hawd-multi-panel" hidden>
+                        <label class="hawd-multi-all-row">
+                            <input type="checkbox" class="hawd-multi-all" checked>
+                            <strong>Todos</strong>
+                        </label>
+                        <?php for ($m = 1; $m <= 12; $m++): ?>
+                            <label>
+                                <input type="checkbox" class="hawd-multi-opt" value="<?php echo $m; ?>" checked>
+                                <?php echo esc_html(date_i18n('F', mktime(0, 0, 0, $m, 1))); ?>
+                            </label>
+                        <?php endfor; ?>
+                    </div>
+                </div>
             </div>
 
-            <!-- Estado -->
+            <!-- Estado (multi-select con checkboxes) -->
             <div class="hawd-filter-group">
-                <label for="hawd_status">Estado</label>
-                <select id="hawd_status" class="hawd-filter">
-                    <option value="all">Todos</option>
-                    <?php foreach ($order_statuses as $slug => $label): ?>
-                        <option value="<?php echo esc_attr($slug); ?>">
-                            <?php echo esc_html($label); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
+                <label>Estado</label>
+                <div class="hawd-multi" data-name="status" data-placeholder="Todos">
+                    <button type="button" class="hawd-multi-toggle">Todos</button>
+                    <div class="hawd-multi-panel" hidden>
+                        <label class="hawd-multi-all-row">
+                            <input type="checkbox" class="hawd-multi-all" checked>
+                            <strong>Todos</strong>
+                        </label>
+                        <?php foreach ($order_statuses as $slug => $label): ?>
+                            <label>
+                                <input type="checkbox" class="hawd-multi-opt" value="<?php echo esc_attr($slug); ?>" checked>
+                                <?php echo esc_html($label); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             </div>
 
-            <!-- Departamento -->
-            <div class="hawd-filter-group">
-                <label for="hawd_billing_state">Depto.</label>
-                <select id="hawd_billing_state" class="hawd-filter">
-                    <option value="all">Todos</option>
-                    <?php foreach ($billing_states as $st): ?>
-                        <option value="<?php echo esc_attr($st->code); ?>">
-                            <?php echo esc_html($st->name); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <!-- Sucursal (atributo de producto pa_sucursal) -->
+            <!-- Sucursal (atributo de producto pa_sucursal) — Origen del traspaso -->
             <div class="hawd-filter-group">
                 <label for="hawd_sucursal">Sucursal</label>
                 <select id="hawd_sucursal" class="hawd-filter">
@@ -83,17 +84,44 @@ if (!defined('ABSPATH')) {
                 </select>
             </div>
 
-            <!-- Método de envío -->
+            <!-- Departamento (multi-select con checkboxes) — Destino del traspaso -->
             <div class="hawd-filter-group">
-                <label for="hawd_shipping">Envío</label>
-                <select id="hawd_shipping" class="hawd-filter">
-                    <option value="all">Todos</option>
-                    <?php foreach ($shipping_methods as $method): ?>
-                        <option value="<?php echo esc_attr($method); ?>">
-                            <?php echo esc_html($method); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
+                <label>Depto.</label>
+                <div class="hawd-multi" data-name="billing_state" data-placeholder="Todos">
+                    <button type="button" class="hawd-multi-toggle">Todos</button>
+                    <div class="hawd-multi-panel" hidden>
+                        <label class="hawd-multi-all-row">
+                            <input type="checkbox" class="hawd-multi-all" checked>
+                            <strong>Todos</strong>
+                        </label>
+                        <?php foreach ($billing_states as $st): ?>
+                            <label>
+                                <input type="checkbox" class="hawd-multi-opt" value="<?php echo esc_attr($st->code); ?>" checked>
+                                <?php echo esc_html($st->name); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Método de envío (multi-select con checkboxes) -->
+            <div class="hawd-filter-group">
+                <label>Envío</label>
+                <div class="hawd-multi" data-name="shipping_method" data-placeholder="Todos">
+                    <button type="button" class="hawd-multi-toggle">Todos</button>
+                    <div class="hawd-multi-panel" hidden>
+                        <label class="hawd-multi-all-row">
+                            <input type="checkbox" class="hawd-multi-all" checked>
+                            <strong>Todos</strong>
+                        </label>
+                        <?php foreach ($shipping_methods as $method): ?>
+                            <label>
+                                <input type="checkbox" class="hawd-multi-opt" value="<?php echo esc_attr($method); ?>" checked>
+                                <?php echo esc_html($method); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             </div>
 
             <!-- Método de pago -->
@@ -151,6 +179,60 @@ if (!defined('ABSPATH')) {
         </div>
     </div>
 
+    <!-- ═══ ESTADÍSTICAS ═══ -->
+    <div class="hawd-stats-card" id="hawd_stats_card">
+        <div class="hawd-stats-header">
+            <h3 class="hawd-stats-title">
+                <span class="dashicons dashicons-chart-bar"></span>
+                Estadísticas
+                <span class="hawd-stats-count" id="hawd_stats_count">— pedidos</span>
+            </h3>
+            <button type="button" class="hawd-stats-toggle-users" id="hawd_stats_toggle_users"
+                    aria-expanded="false">
+                Venta total por usuario
+                <span class="hawd-stats-toggle-icon">&#9662;</span>
+            </button>
+        </div>
+
+        <div class="hawd-stats-grid">
+            <div class="hawd-stat-tile hawd-stat-deposit">
+                <span class="hawd-stat-label">Total Depositado</span>
+                <span class="hawd-stat-value" id="hawd_stat_depositado">—</span>
+            </div>
+            <div class="hawd-stat-tile hawd-stat-total">
+                <span class="hawd-stat-label">Total</span>
+                <span class="hawd-stat-value" id="hawd_stat_total">—</span>
+            </div>
+            <div class="hawd-stat-tile hawd-stat-shipping">
+                <span class="hawd-stat-label">Total Costo de Envío</span>
+                <span class="hawd-stat-value" id="hawd_stat_envio">—</span>
+                <span class="hawd-stat-sub" id="hawd_stat_envio_sub"></span>
+            </div>
+            <div class="hawd-stat-tile hawd-stat-ibex"
+                 title="7% retenido por IBEX en pedidos con envío IBEX y pago Contra Entrega">
+                <span class="hawd-stat-label">7% IBEX no depositado</span>
+                <span class="hawd-stat-value" id="hawd_stat_ibex">—</span>
+                <span class="hawd-stat-sub" id="hawd_stat_ibex_sub">— pedidos IBEX-COD</span>
+            </div>
+        </div>
+
+        <div class="hawd-stats-users" id="hawd_stats_users" hidden>
+            <div class="hawd-stats-users-wrap">
+                <table class="hawd-stats-users-table">
+                    <thead>
+                        <tr>
+                            <th class="hawd-su-rank">#</th>
+                            <th class="hawd-su-user">Usuario</th>
+                            <th class="hawd-su-count">Pedidos</th>
+                            <th class="hawd-su-total">Venta Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hawd_stats_users_body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ BARRA DE ACCIONES ═══ -->
     <div class="hawd-actions-bar">
         <div class="hawd-actions-left">
@@ -161,22 +243,29 @@ if (!defined('ABSPATH')) {
                 Completar Depósito
             </button>
 
+            <button id="hawd_btn_pago_envio" class="button button-secondary" disabled>
+                Pagar Envío
+            </button>
+
+            <button id="hawd_btn_pago_envio_all" class="button button-secondary"
+                    title="Registra fecha de pago de envío para todos los pedidos que cumplan los filtros activos">
+                Pagar Envío TODOS los filtrados
+            </button>
+
             <form id="hawd_csv_form" method="post"
                   action="<?php echo esc_url(admin_url('admin-post.php')); ?>"
                   style="display:inline;">
                 <?php wp_nonce_field('hawd_export_csv', 'hawd_csv_nonce'); ?>
                 <input type="hidden" name="action" value="hawd_export_csv">
                 <input type="hidden" name="year" id="hawd_csv_year">
-                <input type="hidden" name="month" id="hawd_csv_month">
-                <input type="hidden" name="status" id="hawd_csv_status">
                 <input type="hidden" name="payment_method" id="hawd_csv_payment">
-                <input type="hidden" name="shipping_method" id="hawd_csv_shipping">
-                <input type="hidden" name="billing_state" id="hawd_csv_billing_state">
                 <input type="hidden" name="sucursal" id="hawd_csv_sucursal">
                 <input type="hidden" name="deposit" id="hawd_csv_deposit">
                 <input type="hidden" name="deposit_search" id="hawd_csv_deposit_search">
                 <input type="hidden" name="no_deposit" id="hawd_csv_no_deposit">
                 <input type="hidden" name="search" id="hawd_csv_search">
+                <!-- Filtros multi-valor: rellenado dinámico desde JS (month[], status[], shipping_method[], billing_state[]) -->
+                <span id="hawd_csv_multi_inputs"></span>
                 <button type="submit" class="button button-secondary">
                     Exportar CSV
                 </button>
@@ -193,7 +282,6 @@ if (!defined('ABSPATH')) {
                         <input type="checkbox" id="hawd_check_all" title="Seleccionar todos">
                     </th>
                     <th class="hawd-col-date">Fecha</th>
-                    <th class="hawd-col-user">Usuario</th>
                     <th class="hawd-col-id"># Pedido</th>
                     <th class="hawd-col-postcode">Guía</th>
                     <th class="hawd-col-status">Estado</th>
@@ -206,6 +294,7 @@ if (!defined('ABSPATH')) {
                     <th class="hawd-col-total">Total</th>
                     <th class="hawd-col-mdeposit">Monto Dep.</th>
                     <th class="hawd-col-return">F. Retorno</th>
+                    <th class="hawd-col-fpago">F. Pago Envío</th>
                 </tr>
             </thead>
             <tbody id="hawd_tbody">

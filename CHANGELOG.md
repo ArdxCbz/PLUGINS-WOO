@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v2.1.0
+- **feat(demv):** Se implementaron filtros multi-selección (checkboxes) para departamento y método de envío.
+- **feat(demv):** Se agregó panel de estadísticas (Total Depositado, Total, Costo de Envío, 7% IBEX).
+- **feat(demv):** Nueva tabla de top usuarios por ventas en el panel de estadísticas.
+- **feat(demv):** Se agregó funcionalidad "Pagar Envío" con soporte para pago masivo de envíos filtrados y nueva columna "F. Pago Envío".
+- **feat(demv):** Soporte integrado para vista y exportación CSV de Traspasos.
+- **feat(demv):** Se incrementó la versión del plugin a 3.6.
+
 ## v2.0.2
 - **feat(demv):** Se incrementó la versión de HPOS Ardxoz Woo DEMV a 3.1.
 - **feat(demv):** Se añadió filtro por sucursal (`pa_sucursal`) en la vista de depósitos.

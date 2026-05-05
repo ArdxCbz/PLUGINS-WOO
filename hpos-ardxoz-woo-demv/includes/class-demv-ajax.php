@@ -17,6 +17,8 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
     {
         add_action('wp_ajax_hawd_filter_orders', array(__CLASS__, 'filter_orders'));
         add_action('wp_ajax_hawd_complete_deposit', array(__CLASS__, 'complete_deposit'));
+        add_action('wp_ajax_hawd_complete_pago_envio', array(__CLASS__, 'complete_pago_envio'));
+        add_action('wp_ajax_hawd_get_pago_envio_targets', array(__CLASS__, 'get_pago_envio_targets'));
         add_action('wp_ajax_hawd_get_deposit_numbers', array(__CLASS__, 'get_deposit_numbers'));
         add_action('wp_ajax_hawd_update_costo_envio', array(__CLASS__, 'update_costo_envio'));
         add_action('admin_post_hawd_export_csv', array(__CLASS__, 'export_csv'));
@@ -34,13 +36,25 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
             wp_send_json_error(array('message' => 'No autorizado'));
         }
 
-        $filters = array(
+        $filters = self::extract_filters_from_post();
+        $result  = HPOS_Ardxoz_Woo_DEMV_Query::get_filtered_orders($filters);
+
+        wp_send_json_success($result);
+    }
+
+    /**
+     * Extrae y sanitiza los filtros estándar de la request POST.
+     * Compartido entre filter_orders y get_pago_envio_targets.
+     */
+    private static function extract_filters_from_post()
+    {
+        return array(
             'year'            => sanitize_text_field($_POST['year'] ?? wp_date('Y')),
-            'month'           => sanitize_text_field($_POST['month'] ?? 'all'),
-            'status'          => sanitize_text_field($_POST['status'] ?? 'all'),
+            'month'           => self::sanitize_filter_array($_POST['month'] ?? array()),
+            'status'          => self::sanitize_filter_array($_POST['status'] ?? array()),
+            'shipping_method' => self::sanitize_filter_array($_POST['shipping_method'] ?? array()),
+            'billing_state'   => self::sanitize_filter_array($_POST['billing_state'] ?? array()),
             'payment_method'  => sanitize_text_field($_POST['payment_method'] ?? 'all'),
-            'shipping_method' => sanitize_text_field($_POST['shipping_method'] ?? 'all'),
-            'billing_state'   => sanitize_text_field($_POST['billing_state'] ?? 'all'),
             'sucursal'        => sanitize_text_field($_POST['sucursal'] ?? 'all'),
             'deposit'         => sanitize_text_field($_POST['deposit'] ?? 'all'),
             'deposit_search'  => sanitize_text_field($_POST['deposit_search'] ?? ''),
@@ -49,10 +63,26 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
             'per_page'        => intval($_POST['per_page'] ?? 50),
             'page'            => intval($_POST['page'] ?? 1),
         );
+    }
 
-        $result = HPOS_Ardxoz_Woo_DEMV_Query::get_filtered_orders($filters);
-
-        wp_send_json_success($result);
+    /**
+     * Sanitiza un filtro multi-valor recibido por POST.
+     * Acepta string suelto o array. Descarta vacíos y valores literales 'all'.
+     * Retorna siempre un array (potencialmente vacío = sin filtro).
+     */
+    private static function sanitize_filter_array($input)
+    {
+        if (!is_array($input)) {
+            $input = array($input);
+        }
+        $clean = array();
+        foreach ($input as $v) {
+            $v = sanitize_text_field((string) $v);
+            if ($v !== '' && $v !== 'all') {
+                $clean[] = $v;
+            }
+        }
+        return array_values(array_unique($clean));
     }
 
     /**
@@ -177,6 +207,165 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
     }
 
     /**
+     * AJAX: Registrar fecha de pago de envío para pedidos seleccionados.
+     *
+     * Recibe: order_ids[], fecha
+     * Para cada pedido:
+     *  1. Verifica que no tenga ya fecha de pago de envío
+     *  2. Guarda el meta _hpos_ardxoz_woo_fecha_pago_envio
+     *  3. Agrega nota privada al pedido
+     *
+     * No modifica el estado del pedido ni otros metas.
+     */
+    public static function complete_pago_envio()
+    {
+        check_ajax_referer('hawd_page_nonce', 'nonce');
+
+        if (!current_user_can('manage_woocommerce')) {
+            wp_send_json_error(array('message' => 'No autorizado'));
+        }
+
+        $order_ids = isset($_POST['order_ids']) ? array_slice(array_map('intval', (array) $_POST['order_ids']), 0, 200) : array();
+        $fecha     = sanitize_text_field($_POST['fecha'] ?? '');
+
+        if (empty($order_ids)) {
+            wp_send_json_error(array('message' => 'No hay pedidos seleccionados'));
+        }
+
+        if (!$fecha) {
+            wp_send_json_error(array('message' => 'La fecha de pago de envío es requerida'));
+        }
+
+        $results   = array();
+        $processed = 0;
+        $skipped   = 0;
+        $errors    = 0;
+
+        foreach ($order_ids as $order_id) {
+            $order = wc_get_order($order_id);
+
+            if (!$order) {
+                $results[] = array(
+                    'id'     => $order_id,
+                    'status' => 'error',
+                    'reason' => 'Pedido no encontrado',
+                );
+                $errors++;
+                continue;
+            }
+
+            // Evita sobrescribir si ya hay fecha de pago de envío registrada
+            $existing = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_fecha_pago_envio');
+
+            if ($existing) {
+                $results[] = array(
+                    'id'     => $order_id,
+                    'number' => $order->get_order_number(),
+                    'status' => 'skipped',
+                    'reason' => 'Ya tiene fecha de pago de envío: ' . $existing,
+                );
+                $skipped++;
+                continue;
+            }
+
+            try {
+                $order->update_meta_data('_hpos_ardxoz_woo_fecha_pago_envio', $fecha);
+                $order->save();
+
+                $nota = sprintf("Pago de envío registrado:\nFecha: %s", $fecha);
+                $order->add_order_note($nota, false);
+
+                $results[] = array(
+                    'id'     => $order_id,
+                    'number' => $order->get_order_number(),
+                    'status' => 'processed',
+                );
+                $processed++;
+            } catch (Exception $e) {
+                $results[] = array(
+                    'id'     => $order_id,
+                    'status' => 'error',
+                    'reason' => 'Error al guardar: ' . $e->getMessage(),
+                );
+                $errors++;
+            }
+        }
+
+        wp_send_json_success(array(
+            'results'     => $results,
+            'processed'   => $processed,
+            'skipped'     => $skipped,
+            'errors'      => $errors,
+            'total_found' => count($order_ids),
+            'message'     => sprintf(
+                'Encontrados: %d | Procesados: %d | Omitidos: %d | Errores: %d',
+                count($order_ids),
+                $processed,
+                $skipped,
+                $errors
+            ),
+        ));
+    }
+
+    /**
+     * AJAX: Lista de IDs elegibles para Pagar Envío masivo según filtros activos.
+     *
+     * Recibe los mismos filtros que filter_orders. Retorna los IDs que aún NO tienen
+     * fecha_pago_envio Y tienen costo_envio > 0, junto con conteos por categoría
+     * para mostrar resumen en el modal de confirmación.
+     */
+    public static function get_pago_envio_targets()
+    {
+        check_ajax_referer('hawd_page_nonce', 'nonce');
+
+        if (!current_user_can('manage_woocommerce')) {
+            wp_send_json_error(array('message' => 'No autorizado'));
+        }
+
+        $filters = self::extract_filters_from_post();
+        $filters['return_ids_only'] = true;
+
+        $result  = HPOS_Ardxoz_Woo_DEMV_Query::get_filtered_orders($filters);
+        $all_ids = isset($result['ids']) ? $result['ids'] : array();
+
+        $eligible_ids    = array();
+        $skipped_paid    = 0;
+        $skipped_no_cost = 0;
+        $total_costo     = 0.0;
+
+        foreach ($all_ids as $oid) {
+            $order = wc_get_order($oid);
+            if (!$order) {
+                continue;
+            }
+
+            $existing = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_fecha_pago_envio');
+            if ($existing) {
+                $skipped_paid++;
+                continue;
+            }
+
+            $costo = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_costo_envio');
+            if ($costo === '' || $costo === null || floatval($costo) <= 0) {
+                $skipped_no_cost++;
+                continue;
+            }
+
+            $eligible_ids[] = (int) $oid;
+            $total_costo   += floatval($costo);
+        }
+
+        wp_send_json_success(array(
+            'ids'             => $eligible_ids,
+            'count'           => count($eligible_ids),
+            'total_found'     => count($all_ids),
+            'skipped_paid'    => $skipped_paid,
+            'skipped_no_cost' => $skipped_no_cost,
+            'total_costo'     => round($total_costo, 2),
+        ));
+    }
+
+    /**
      * Exportar CSV de pedidos filtrados.
      * Se accede via admin-post.php (form submit), no AJAX.
      * Exporta en bloques de 500 pedidos para evitar agotamiento de memoria.
@@ -191,11 +380,11 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
 
         $filters = array(
             'year'            => sanitize_text_field($_POST['year'] ?? wp_date('Y')),
-            'month'           => sanitize_text_field($_POST['month'] ?? 'all'),
-            'status'          => sanitize_text_field($_POST['status'] ?? 'all'),
+            'month'           => self::sanitize_filter_array($_POST['month'] ?? array()),
+            'status'          => self::sanitize_filter_array($_POST['status'] ?? array()),
+            'shipping_method' => self::sanitize_filter_array($_POST['shipping_method'] ?? array()),
+            'billing_state'   => self::sanitize_filter_array($_POST['billing_state'] ?? array()),
             'payment_method'  => sanitize_text_field($_POST['payment_method'] ?? 'all'),
-            'shipping_method' => sanitize_text_field($_POST['shipping_method'] ?? 'all'),
-            'billing_state'   => sanitize_text_field($_POST['billing_state'] ?? 'all'),
             'sucursal'        => sanitize_text_field($_POST['sucursal'] ?? 'all'),
             'deposit'         => sanitize_text_field($_POST['deposit'] ?? 'all'),
             'deposit_search'  => sanitize_text_field($_POST['deposit_search'] ?? ''),
@@ -206,8 +395,12 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
         );
 
         $year     = $filters['year'];
-        $month    = $filters['month'] !== 'all' ? '_' . str_pad($filters['month'], 2, '0', STR_PAD_LEFT) : '';
-        $filename = "depositos_{$year}{$month}.csv";
+        // Si hay un único mes seleccionado lo incluimos en el filename, si hay varios lo dejamos sin sufijo
+        $month_suffix = '';
+        if (count($filters['month']) === 1) {
+            $month_suffix = '_' . str_pad((string) $filters['month'][0], 2, '0', STR_PAD_LEFT);
+        }
+        $filename = "depositos_{$year}{$month_suffix}.csv";
 
         while (ob_get_level()) {
             ob_end_clean();
@@ -307,6 +500,14 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
         $order = wc_get_order($order_id);
         if (!$order) {
             wp_send_json_error(array('message' => 'Pedido no encontrado'));
+        }
+
+        // Bloqueo: si ya existe fecha de pago de envío, no se permite editar.
+        $fecha_pago_envio = (string) HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_fecha_pago_envio');
+        if ($fecha_pago_envio !== '') {
+            wp_send_json_error(array(
+                'message' => 'No se puede editar: el pedido ya tiene pago de envío registrado (' . $fecha_pago_envio . ').',
+            ));
         }
 
         $valor = ($normal === '') ? '' : (string) floatval($normal);

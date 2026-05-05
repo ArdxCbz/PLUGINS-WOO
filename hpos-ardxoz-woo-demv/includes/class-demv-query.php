@@ -19,14 +19,20 @@ class HPOS_Ardxoz_Woo_DEMV_Query
      */
     public static function get_filtered_orders($filters)
     {
-        $year  = intval($filters['year'] ?? wp_date('Y'));
-        $month = $filters['month'] ?? 'all';
+        $year     = intval($filters['year'] ?? wp_date('Y'));
         $per_page = intval($filters['per_page'] ?? 50);
         $page     = max(1, intval($filters['page'] ?? 1));
 
+        // Filtros multi-valor: arrays vacíos = sin filtro
+        $months         = self::normalize_int_array($filters['month'] ?? array(), 1, 12);
+        $statuses       = self::normalize_string_array($filters['status'] ?? array());
+        $shipping_arr   = self::normalize_string_array($filters['shipping_method'] ?? array());
+        $billing_arr    = self::normalize_string_array($filters['billing_state'] ?? array());
+
         // — Rango de fechas —
-        if ($month && $month !== 'all') {
-            $m   = intval($month);
+        // Optimización: con un único mes acotamos la consulta a ese mes; con varios o ninguno usamos el año completo y filtramos después.
+        if (count($months) === 1) {
+            $m   = intval($months[0]);
             $mp  = str_pad($m, 2, '0', STR_PAD_LEFT);
             $ld  = date('t', mktime(0, 0, 0, $m, 1, $year));
             $date_range = "{$year}-{$mp}-01...{$year}-{$mp}-{$ld}";
@@ -44,11 +50,10 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             'order'        => 'DESC',
         );
 
-        // Estado
-        $status = $filters['status'] ?? 'all';
-        $args['status'] = ($status && $status !== 'all') ? $status : 'any';
+        // Estado: wc_get_orders acepta array nativamente
+        $args['status'] = !empty($statuses) ? $statuses : 'any';
 
-        // Método de pago (nativo en wc_get_orders)
+        // Método de pago (nativo en wc_get_orders) — sigue siendo único
         $payment = $filters['payment_method'] ?? 'all';
         if ($payment && $payment !== 'all') {
             $args['payment_method'] = $payment;
@@ -58,13 +63,12 @@ class HPOS_Ardxoz_Woo_DEMV_Query
         $order_ids = wc_get_orders($args);
 
         // — Post-filtros que requieren objeto WC_Order —
-        $shipping_filter = $filters['shipping_method'] ?? 'all';
         $deposit_filter  = trim($filters['deposit'] ?? 'all');
         $deposit_search  = trim($filters['deposit_search'] ?? '');
         $no_deposit      = !empty($filters['no_deposit']);
-        $billing_state_f = $filters['billing_state'] ?? 'all';
         $sucursal_filter = strtoupper(trim($filters['sucursal'] ?? 'all'));
         $search          = trim($filters['search'] ?? '');
+        $multi_month_filter = count($months) > 1; // se aplica solo si hay varios meses; el caso de 1 mes ya lo cubre el date_range
 
         // Soporte multi-término: separar búsqueda por espacios/comas
         $search_terms = array();
@@ -73,11 +77,12 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             $search_terms = array_values(array_filter(array_map('trim', $search_terms)));
         }
 
-        $needs_post_filter = ($shipping_filter && $shipping_filter !== 'all')
+        $needs_post_filter = !empty($shipping_arr)
+                          || !empty($billing_arr)
+                          || $multi_month_filter
                           || ($deposit_filter && $deposit_filter !== 'all')
                           || $deposit_search !== ''
                           || $no_deposit
-                          || ($billing_state_f && $billing_state_f !== 'all')
                           || ($sucursal_filter && $sucursal_filter !== 'ALL')
                           || !empty($search_terms);
 
@@ -90,12 +95,24 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                     continue;
                 }
 
-                // Filtro: método de envío
-                if ($shipping_filter && $shipping_filter !== 'all') {
+                // Filtro multi-mes (cuando hay más de un mes seleccionado)
+                if ($multi_month_filter) {
+                    $created = $order->get_date_created();
+                    if (!$created) {
+                        continue;
+                    }
+                    $order_month = (int) $created->date('n');
+                    if (!in_array($order_month, $months, true)) {
+                        continue;
+                    }
+                }
+
+                // Filtro: método de envío (cualquiera de los seleccionados)
+                if (!empty($shipping_arr)) {
                     $methods = $order->get_shipping_methods();
                     $match = false;
                     foreach ($methods as $m) {
-                        if ($m->get_method_title() === $shipping_filter) {
+                        if (in_array($m->get_method_title(), $shipping_arr, true)) {
                             $match = true;
                             break;
                         }
@@ -105,9 +122,9 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                     }
                 }
 
-                // Filtro: departamento (billing_state)
-                if ($billing_state_f && $billing_state_f !== 'all') {
-                    if ($order->get_billing_state() !== $billing_state_f) {
+                // Filtro: departamento (billing_state) — cualquiera de los seleccionados
+                if (!empty($billing_arr)) {
+                    if (!in_array($order->get_billing_state(), $billing_arr, true)) {
                         continue;
                     }
                 }
@@ -164,6 +181,15 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             $order_ids = $filtered_ids;
         }
 
+        // Atajo: si el caller solo necesita los IDs filtrados (operaciones masivas),
+        // retornamos antes de paginar/construir filas/calcular stats.
+        if (!empty($filters['return_ids_only'])) {
+            return array(
+                'ids'   => array_values(array_map('intval', $order_ids)),
+                'total' => count($order_ids),
+            );
+        }
+
         // — Paginación —
         $total       = count($order_ids);
         $total_pages = $total > 0 ? (int) ceil($total / $per_page) : 1;
@@ -180,11 +206,205 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             $rows[] = self::build_row_data($order);
         }
 
+        // — Estadísticas globales sobre TODOS los pedidos filtrados —
+        $stats = self::compute_stats($order_ids);
+
         return array(
             'rows'  => $rows,
             'total' => $total,
             'pages' => $total_pages,
             'page'  => $page,
+            'stats' => $stats,
+        );
+    }
+
+    /**
+     * Calcula totales acumulados sobre el conjunto completo de pedidos filtrados,
+     * sin necesidad de cargar cada WC_Order. Usa SQL sobre wc_orders y wc_orders_meta.
+     *
+     * Retorna sumas de:
+     *  - total_depositado  (meta _hpos_ardxoz_woo_monto_deposito  | legacy IMPORTE_DEPOSITADO)
+     *  - total_orders      (wc_orders.total_amount)
+     *  - total_costo_envio (meta _hpos_ardxoz_woo_costo_envio     | legacy costo_courier)
+     *  - ibex_no_depositado(7% retenido por IBEX en pedidos IBEX + Pago Contra Entrega)
+     *  - por_usuario       (suma de total_amount agrupado por customer_id, ordenado desc)
+     *
+     * @param int[] $order_ids
+     * @return array
+     */
+    public static function compute_stats($order_ids)
+    {
+        $empty = array(
+            'count'              => 0,
+            'total_depositado'   => 0.0,
+            'total_orders'       => 0.0,
+            'total_costo_envio'  => 0.0,
+            'ibex_no_depositado' => 0.0,
+            'ibex_count'         => 0,
+            'por_usuario'        => array(),
+        );
+
+        if (empty($order_ids)) {
+            return $empty;
+        }
+
+        global $wpdb;
+        $orders_table = $wpdb->prefix . 'wc_orders';
+        $meta_table   = $wpdb->prefix . 'wc_orders_meta';
+        $items_table  = $wpdb->prefix . 'woocommerce_order_items';
+
+        $total_orders            = 0.0;
+        $total_depositado        = 0.0;
+        $total_costo_envio       = 0.0;
+        $total_costo_envio_ibex  = 0.0;
+        $ibex_no_depositado      = 0.0;
+        $ibex_count              = 0;
+        $user_totals             = array(); // customer_id => ['cnt'=>n,'total'=>x]
+
+        // Procesa en lotes para evitar IN(...) excesivamente grandes
+        $chunks = array_chunk(array_map('intval', $order_ids), 1000);
+
+        foreach ($chunks as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '%d'));
+
+            // Total de pedidos + agrupado por usuario en una sola pasada
+            $rows_o = $wpdb->get_results($wpdb->prepare(
+                "SELECT customer_id, total_amount
+                 FROM {$orders_table}
+                 WHERE id IN ($placeholders)",
+                $chunk
+            ));
+            foreach ($rows_o as $r) {
+                $amt = (float) $r->total_amount;
+                $total_orders += $amt;
+                $cid = intval($r->customer_id);
+                if (!isset($user_totals[$cid])) {
+                    $user_totals[$cid] = array('cnt' => 0, 'total' => 0.0);
+                }
+                $user_totals[$cid]['cnt']   += 1;
+                $user_totals[$cid]['total'] += $amt;
+            }
+
+            // Monto depositado (HPOS preferente, fallback legacy)
+            $rows_d = $wpdb->get_results($wpdb->prepare(
+                "SELECT order_id,
+                        MAX(CASE WHEN meta_key = '_hpos_ardxoz_woo_monto_deposito' THEN meta_value END) AS hpos,
+                        MAX(CASE WHEN meta_key = 'IMPORTE_DEPOSITADO'              THEN meta_value END) AS legacy
+                 FROM {$meta_table}
+                 WHERE order_id IN ($placeholders)
+                   AND meta_key IN ('_hpos_ardxoz_woo_monto_deposito', 'IMPORTE_DEPOSITADO')
+                 GROUP BY order_id",
+                $chunk
+            ));
+            foreach ($rows_d as $r) {
+                $val = ($r->hpos !== null && $r->hpos !== '') ? $r->hpos : $r->legacy;
+                if ($val !== null && $val !== '') {
+                    $total_depositado += (float) $val;
+                }
+            }
+
+            // IDs del chunk con envío IBEX (para splitear costo total vs costo IBEX)
+            $ibex_ids_args = array_merge($chunk, array(HPOS_Ardxoz_Woo_DEMV_Calculator::SHIPPING_IBEX));
+            $ibex_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT DISTINCT oi.order_id
+                 FROM {$items_table} oi
+                 WHERE oi.order_id IN ($placeholders)
+                   AND oi.order_item_type = 'shipping'
+                   AND oi.order_item_name = %s",
+                $ibex_ids_args
+            ));
+            $ibex_set = array_flip(array_map('intval', $ibex_ids));
+
+            // Costo de envío (HPOS preferente, fallback legacy)
+            $rows_c = $wpdb->get_results($wpdb->prepare(
+                "SELECT order_id,
+                        MAX(CASE WHEN meta_key = '_hpos_ardxoz_woo_costo_envio' THEN meta_value END) AS hpos,
+                        MAX(CASE WHEN meta_key = 'costo_courier'                THEN meta_value END) AS legacy
+                 FROM {$meta_table}
+                 WHERE order_id IN ($placeholders)
+                   AND meta_key IN ('_hpos_ardxoz_woo_costo_envio', 'costo_courier')
+                 GROUP BY order_id",
+                $chunk
+            ));
+            foreach ($rows_c as $r) {
+                $val = ($r->hpos !== null && $r->hpos !== '') ? $r->hpos : $r->legacy;
+                if ($val !== null && $val !== '') {
+                    $costo = (float) $val;
+                    $total_costo_envio += $costo;
+                    if (isset($ibex_set[(int) $r->order_id])) {
+                        $total_costo_envio_ibex += $costo;
+                    }
+                }
+            }
+
+            // 7% IBEX no depositado: pedidos con envío IBEX + pago "Pago Contra Entrega"
+            // Replica la condición exacta del Calculator (FEE_IBEX_COD).
+            $args_ibex = array_merge(
+                $chunk,
+                array(
+                    HPOS_Ardxoz_Woo_DEMV_Calculator::PAYMENT_COD,
+                    HPOS_Ardxoz_Woo_DEMV_Calculator::SHIPPING_IBEX,
+                )
+            );
+            $rows_ibex = $wpdb->get_results($wpdb->prepare(
+                "SELECT o.total_amount
+                 FROM {$orders_table} o
+                 WHERE o.id IN ($placeholders)
+                   AND o.payment_method_title = %s
+                   AND EXISTS (
+                       SELECT 1 FROM {$items_table} oi
+                       WHERE oi.order_id = o.id
+                         AND oi.order_item_type = 'shipping'
+                         AND oi.order_item_name = %s
+                   )",
+                $args_ibex
+            ));
+            foreach ($rows_ibex as $r) {
+                $ibex_no_depositado += (float) $r->total_amount * HPOS_Ardxoz_Woo_DEMV_Calculator::FEE_IBEX_COD;
+                $ibex_count++;
+            }
+        }
+
+        // Resolver nombres de usuario y ordenar por total descendente
+        uasort($user_totals, function ($a, $b) {
+            if ($a['total'] === $b['total']) return 0;
+            return ($a['total'] < $b['total']) ? 1 : -1;
+        });
+
+        $por_usuario = array();
+        foreach ($user_totals as $uid => $data) {
+            $uid = intval($uid);
+            if ($uid > 0) {
+                $user = get_userdata($uid);
+                if ($user) {
+                    $login = $user->user_login;
+                    $name  = $user->display_name ?: $user->user_login;
+                } else {
+                    $login = "#{$uid}";
+                    $name  = "#{$uid}";
+                }
+            } else {
+                $login = '(invitado)';
+                $name  = 'Invitado';
+            }
+            $por_usuario[] = array(
+                'user_id'    => $uid,
+                'user_login' => $login,
+                'name'       => $name,
+                'count'      => intval($data['cnt']),
+                'total'      => round((float) $data['total'], 2),
+            );
+        }
+
+        return array(
+            'count'                  => count($order_ids),
+            'total_depositado'       => round($total_depositado, 2),
+            'total_orders'           => round($total_orders, 2),
+            'total_costo_envio'      => round($total_costo_envio, 2),
+            'total_costo_envio_ibex' => round($total_costo_envio_ibex, 2),
+            'ibex_no_depositado'     => round($ibex_no_depositado, 2),
+            'ibex_count'             => $ibex_count,
+            'por_usuario'            => $por_usuario,
         );
     }
 
@@ -233,8 +453,10 @@ class HPOS_Ardxoz_Woo_DEMV_Query
         $numero_deposito  = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_numero_deposito');
         $monto_deposito   = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_monto_deposito');
         $fecha_retorno    = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_fecha_retorno');
+        $fecha_pago_envio = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_fecha_pago_envio');
 
-        $has_deposit = ($monto_deposito !== '' && floatval($monto_deposito) > 0);
+        $has_deposit     = ($monto_deposito !== '' && floatval($monto_deposito) > 0);
+        $has_pago_envio  = ($fecha_pago_envio !== '' && $fecha_pago_envio !== null);
 
         // Importe calculado (para modal)
         $importe_calculado = HPOS_Ardxoz_Woo_DEMV_Calculator::calcular($order);
@@ -256,7 +478,9 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             'order_total'           => (float) $order->get_total(),
             'monto_deposito'        => $monto_deposito,
             'fecha_retorno'         => $fecha_retorno,
+            'fecha_pago_envio'      => $fecha_pago_envio,
             'has_deposit'           => $has_deposit,
+            'has_pago_envio'        => $has_pago_envio,
             'importe_calculado'     => $importe_calculado,
             'edit_url'              => $order->get_edit_order_url(),
         );
@@ -423,5 +647,42 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             if ($suc !== '') $sucursales[$suc] = true;
         }
         return array_keys($sucursales);
+    }
+
+    /**
+     * Normaliza un filtro multi-valor de strings (acepta string suelto o array).
+     * Descarta vacíos y valores literales 'all'.
+     */
+    private static function normalize_string_array($input)
+    {
+        if (!is_array($input)) {
+            $input = array($input);
+        }
+        $out = array();
+        foreach ($input as $v) {
+            $v = trim((string) $v);
+            if ($v !== '' && $v !== 'all') {
+                $out[] = $v;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * Normaliza un filtro multi-valor de enteros con clamp [min,max].
+     */
+    private static function normalize_int_array($input, $min, $max)
+    {
+        if (!is_array($input)) {
+            $input = array($input);
+        }
+        $out = array();
+        foreach ($input as $v) {
+            $n = intval($v);
+            if ($n >= $min && $n <= $max) {
+                $out[] = $n;
+            }
+        }
+        return array_values(array_unique($out));
     }
 }

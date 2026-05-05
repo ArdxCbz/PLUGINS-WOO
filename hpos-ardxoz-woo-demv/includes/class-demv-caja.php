@@ -286,9 +286,27 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
         return array_keys($sucursales);
     }
 
+    private static function order_has_tienda_category($order)
+    {
+        foreach ($order->get_items() as $item) {
+            $product_id = $item->get_product_id();
+            if ($product_id && has_term('tienda', 'product_cat', $product_id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static function order_matches_sucursal($order, $sucursal)
     {
-        return in_array($sucursal, self::get_order_sucursales($order), true);
+        if (in_array($sucursal, self::get_order_sucursales($order), true)) {
+            return true;
+        }
+        // SANTA CRUZ también recibe los pedidos con productos de categoría "tienda"
+        if ($sucursal === 'SANTA CRUZ' && self::order_has_tienda_category($order)) {
+            return true;
+        }
+        return false;
     }
 
     // ── Render ────────────────────────────────────────────────────────────────

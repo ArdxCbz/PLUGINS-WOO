@@ -152,6 +152,24 @@ class HPOS_Ardxoz_Woo_DEMV_Admin
             'nonce'        => wp_create_nonce('hawd_page_nonce'),
             'current_year' => wp_date('Y'),
         ]);
+
+        // Caja de Traspasos: solo si el plugin de Traspasos está cargado.
+        if (class_exists('HPOS_Ardxoz_Woo_DEMV_Traspasos')
+            && HPOS_Ardxoz_Woo_DEMV_Traspasos::is_available()) {
+            wp_enqueue_style(
+                'hawd-traspasos-css',
+                HAWD_PLUGIN_URL . 'assets/demv-traspasos.css',
+                ['hawd-page-css'],
+                HAWD_VERSION
+            );
+            wp_enqueue_script(
+                'hawd-traspasos-js',
+                HAWD_PLUGIN_URL . 'assets/demv-traspasos.js',
+                ['jquery', 'hawd-page-js'],
+                HAWD_VERSION,
+                true
+            );
+        }
     }
 
     // ── Render: Depósitos (solo admin) ────────────────────────────────────────
@@ -173,6 +191,13 @@ class HPOS_Ardxoz_Woo_DEMV_Admin
         echo '<h1 class="wp-heading-inline">' . esc_html(get_admin_page_title()) . '</h1>';
         include HAWD_PLUGIN_DIR . 'templates/admin-page.php';
         HPOS_Ardxoz_Woo_DEMV_Caja::render_pendientes_admin();
+
+        // Caja de traspasos (solo si el plugin de Traspasos está activo)
+        if (class_exists('HPOS_Ardxoz_Woo_DEMV_Traspasos')
+            && HPOS_Ardxoz_Woo_DEMV_Traspasos::is_available()) {
+            HPOS_Ardxoz_Woo_DEMV_Traspasos::render();
+        }
+
         echo '</div>';
     }
 

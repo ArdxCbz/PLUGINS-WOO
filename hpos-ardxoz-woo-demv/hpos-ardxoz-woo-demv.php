@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HPOS Ardxoz Woo DEMV
  * Description: Gestión de depósitos bancarios, búsqueda por guía y auto-fill de envío. Compatible HPOS.
- * Version:     3.1
+ * Version:     3.6
  * Author:      Ardxoz
  * Requires Plugins: woocommerce
  */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 
 define('HAWD_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HAWD_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('HAWD_VERSION', '3.1');
+define('HAWD_VERSION', '3.6');
 
 use Automattic\WooCommerce\Utilities\FeaturesUtil;
 
@@ -34,6 +34,7 @@ require_once HAWD_PLUGIN_DIR . 'includes/class-demv-search.php';
 require_once HAWD_PLUGIN_DIR . 'includes/class-demv-checkout.php';
 require_once HAWD_PLUGIN_DIR . 'includes/class-demv-config.php';
 require_once HAWD_PLUGIN_DIR . 'includes/class-demv-caja.php';
+require_once HAWD_PLUGIN_DIR . 'includes/class-demv-traspasos.php';
 
 // Crear tabla de caja al activar el plugin
 register_activation_hook(__FILE__, function () {
@@ -52,4 +53,5 @@ add_action('plugins_loaded', function () {
     HPOS_Ardxoz_Woo_DEMV_Checkout::init();
     HPOS_Ardxoz_Woo_DEMV_Caja::init();
     HPOS_Ardxoz_Woo_DEMV_Config::init();
+    HPOS_Ardxoz_Woo_DEMV_Traspasos::init();
 });
