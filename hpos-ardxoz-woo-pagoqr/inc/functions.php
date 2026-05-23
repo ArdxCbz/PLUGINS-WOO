@@ -25,10 +25,11 @@ function hpos_ardxoz_pagoqr_front_scripts() {
 
     wp_enqueue_style( 'dashicons' );
     wp_enqueue_style( 'hpos-ardxoz-pagoqr-front', plugins_url( 'assets/css/front.css', dirname(__FILE__) ), array( 'dashicons' ), '1.0.3' );
-    wp_enqueue_script( 'hpos-ardxoz-pagoqr-front', plugins_url( 'assets/js/front.js', dirname(__FILE__) ), array( 'jquery' ), '1.0.3', true );
+    wp_enqueue_script( 'hpos-ardxoz-pagoqr-front', plugins_url( 'assets/js/front.js', dirname(__FILE__) ), array( 'jquery' ), '1.0.4', true );
 
     wp_localize_script( 'hpos-ardxoz-pagoqr-front', 'hpos_ardxoz_pagoqr_params', array(
         'ajax_url' => admin_url( 'admin-ajax.php' ),
+        'nonce'    => wp_create_nonce( 'hpos_ardxoz_pagoqr_upload' ),
         'texts'    => array(
             'continue' => 'Continuar',
             'error_image' => 'Por favor, sube solo archivos de imagen (JPG, PNG).',
@@ -151,8 +152,38 @@ add_action( 'wp_footer', 'hpos_ardxoz_pagoqr_footer_popup' );
  * Handler AJAX para subir el comprobante
  */
 function hpos_ardxoz_pagoqr_handle_upload() {
-    if ( ! isset( $_FILES['image'] ) ) {
+    // Verificar nonce. Válido también para invitados (la sesión de WC les asigna uno).
+    if ( ! check_ajax_referer( 'hpos_ardxoz_pagoqr_upload', 'nonce', false ) ) {
+        wp_send_json_error( 'Token de seguridad inválido o expirado. Recarga la página e inténtalo de nuevo.' );
+    }
+
+    if ( ! isset( $_FILES['image'] ) || ! is_array( $_FILES['image'] ) ) {
         wp_send_json_error( 'No se recibió ninguna imagen.' );
+    }
+
+    $file = $_FILES['image'];
+
+    // Error reportado por PHP durante la subida.
+    if ( ! empty( $file['error'] ) || empty( $file['tmp_name'] ) ) {
+        wp_send_json_error( 'Error al subir el archivo. Inténtalo de nuevo.' );
+    }
+
+    // Límite de tamaño (8 MB).
+    $max_bytes = 8 * 1024 * 1024;
+    if ( (int) $file['size'] > $max_bytes ) {
+        wp_send_json_error( 'La imagen supera el tamaño máximo permitido (8 MB).' );
+    }
+
+    // Solo imágenes: validar por el contenido real del archivo, no por la extensión declarada.
+    $allowed_mimes = array(
+        'jpg|jpeg' => 'image/jpeg',
+        'png'      => 'image/png',
+        'gif'      => 'image/gif',
+        'webp'     => 'image/webp',
+    );
+    $check = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'], $allowed_mimes );
+    if ( empty( $check['type'] ) || strpos( $check['type'], 'image/' ) !== 0 ) {
+        wp_send_json_error( 'Solo se permiten imágenes (JPG, PNG, GIF, WEBP).' );
     }
 
     require_once( ABSPATH . 'wp-admin/includes/file.php' );
@@ -162,7 +193,10 @@ function hpos_ardxoz_pagoqr_handle_upload() {
     // Filtro temporal para cambiar el directorio de subida (privacidad)
     add_filter( 'upload_dir', 'hpos_ardxoz_pagoqr_custom_upload_dir' );
 
-    $uploaded_file = wp_handle_upload( $_FILES['image'], array( 'test_form' => false ) );
+    $uploaded_file = wp_handle_upload( $file, array(
+        'test_form' => false,
+        'mimes'     => $allowed_mimes,
+    ) );
 
     remove_filter( 'upload_dir', 'hpos_ardxoz_pagoqr_custom_upload_dir' );
 

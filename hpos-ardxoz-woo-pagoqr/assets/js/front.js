@@ -241,6 +241,7 @@ jQuery(document).ready(function($) {
 
         var formData = new FormData();
         formData.append('action', 'hpos_ardxoz_pagoqr_upload');
+        formData.append('nonce', hpos_ardxoz_pagoqr_params.nonce);
         formData.append('image', currentFile);
 
         $.ajax({
