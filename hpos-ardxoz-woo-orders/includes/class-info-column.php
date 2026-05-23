@@ -86,11 +86,15 @@ class Info_Column
 
         if ($tracking) {
             echo '<div style="margin-bottom:4px;"><strong>Guía:</strong> <code style="background:#eef; padding:2px 4px; border-radius:3px;">' . esc_html($tracking) . '</code></div>';
+        } else {
+            echo '<div style="margin-bottom:4px;"><strong>Guía:</strong> <span style="color:#d63638; font-weight:bold;">Sin Guía</span></div>';
         }
 
         if ($courier_cost) {
             $formatted_cost = get_woocommerce_currency_symbol() . number_format((float) $courier_cost, 2, ',', '.');
             echo '<div style="margin-bottom:4px;"><strong>Costo Envío:</strong> ' . $formatted_cost . '</div>';
+        } else {
+            echo '<div style="margin-bottom:4px;"><strong>Costo Envío:</strong> <span style="color:#d63638; font-weight:bold;">-</span></div>';
         }
 
         if ($payment_method) {
