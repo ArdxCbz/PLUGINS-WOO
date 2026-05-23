@@ -35,7 +35,9 @@ function personalizar_menu_vendedor()
         remove_submenu_page('woocommerce', 'wc-settings&tab=alg_wc_cost_of_goods');
 		// Remover menu del tema
         remove_menu_page('vs-reglas');
-		
+        // Remover Efectivo y Depositos (HPOS Ardxoz Woo DEMV)
+        remove_menu_page('hawd_depositos');
+
 		// Remover plugins extras
         remove_menu_page('webappick-manage-feeds');
         remove_menu_page('wc-admin&path=/marketing'); // React path
