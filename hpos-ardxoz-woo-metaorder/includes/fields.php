@@ -209,6 +209,15 @@ function hpos_ardxoz_woo_get_default_fields(WC_Order $order)
  */
 function hpos_ardxoz_woo_render_fields($fields)
 {
+    echo '<style>
+        .hawm-switch{position:relative;display:inline-block;width:44px;height:22px;vertical-align:middle;margin-top:4px;}
+        .hawm-switch input[type="checkbox"]{opacity:0;width:0;height:0;position:absolute;}
+        .hawm-slider{position:absolute;inset:0;background:#ccc;border-radius:22px;cursor:pointer;transition:.2s;}
+        .hawm-slider::before{content:"";position:absolute;height:18px;width:18px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.2);}
+        .hawm-switch input:checked + .hawm-slider{background:#2271b1;}
+        .hawm-switch input:checked + .hawm-slider::before{transform:translateX(22px);}
+        .hawm-switch input:focus-visible + .hawm-slider{box-shadow:0 0 0 2px #2271b1;}
+    </style>';
     echo '<div class="hpos-ardxoz-woo-fields">';
 
     $current_group = null;
@@ -235,6 +244,13 @@ function hpos_ardxoz_woo_render_fields($fields)
             foreach ($field['options'] as $value => $label) {
                 echo '<label style="margin-right:10px;"><input type="radio" name="' . esc_attr($field['name']) . '" value="' . esc_attr($value) . '" ' . checked($field['value'], $value, false) . '> ' . esc_html($label) . '</label> ';
             }
+        } elseif ($type === 'checkbox') {
+            // Hidden previo garantiza envío de "0" cuando está desmarcado.
+            echo '<input type="hidden" name="' . esc_attr($field['name']) . '" value="0">';
+            echo '<label class="hawm-switch">';
+            echo '<input type="checkbox" name="' . esc_attr($field['name']) . '" value="1" role="switch" ' . checked($field['value'], '1', false) . '>';
+            echo '<span class="hawm-slider"></span>';
+            echo '</label>';
         } elseif ($type === 'select' && !empty($field['options'])) {
             echo '<select name="' . esc_attr($field['name']) . '" class="widefat"' . $attributes . '>';
             echo '<option value="">— Seleccionar —</option>';

@@ -107,6 +107,7 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
             'radio'    => 'Radio',
             'select'   => 'Select',
             'textarea' => 'Textarea',
+            'checkbox' => 'Interruptor (Sí/No)',
         );
         ?>
         <table class="form-table">
@@ -276,7 +277,7 @@ class HPOS_Ardxoz_Woo_MetaOrder_CPT
 
         // Tipo (allowlist)
         if (isset($_POST['haw_field_type'])) {
-            $allowed = array('text', 'number', 'date', 'radio', 'select', 'textarea');
+            $allowed = array('text', 'number', 'date', 'radio', 'select', 'textarea', 'checkbox');
             $type = sanitize_text_field(wp_unslash($_POST['haw_field_type']));
             if (in_array($type, $allowed, true)) {
                 update_post_meta($post_id, '_haw_field_type', $type);
