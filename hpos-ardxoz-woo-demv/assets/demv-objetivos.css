@@ -1,0 +1,221 @@
+/* ── Objetivos ────────────────────────────────────────────────────────── */
+
+.hawd-obj-wrap { max-width: 1200px; }
+
+.hawd-obj-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 14px 0 10px;
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 6px;
+    flex-wrap: wrap;
+}
+.hawd-obj-toolbar label {
+    font-size: 12px;
+    color: #555;
+    font-weight: 600;
+}
+.hawd-obj-toolbar select {
+    margin-left: 6px;
+    min-width: 110px;
+}
+.hawd-obj-loading {
+    font-size: 12px;
+    color: #2271b1;
+    font-style: italic;
+}
+
+.hawd-obj-objective-bar {
+    background: #e8f0fe;
+    border: 1px solid #b3c7f7;
+    border-radius: 5px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #2c5282;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+.hawd-obj-objective-bar .hawd-obj-pair {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+}
+.hawd-obj-objective-bar .hawd-obj-objective-label {
+    font-weight: 600;
+    color: #2c5282;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-size: 11px;
+}
+.hawd-obj-objective-bar .hawd-obj-pair:first-child strong {
+    color: #8a5a00;
+    font-size: 15px;
+}
+.hawd-obj-objective-bar .hawd-obj-pair:last-child strong {
+    color: #1a7c3e;
+    font-size: 16px;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────── */
+
+.hawd-obj-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 6px;
+    margin-bottom: 18px;
+    overflow: hidden;
+}
+.hawd-obj-card-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f0f0f1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.hawd-obj-card-header h2 {
+    margin: 0;
+    font-size: 15px;
+    color: #1d2327;
+}
+.hawd-obj-note {
+    font-size: 12px;
+    color: #777;
+}
+.hawd-obj-note strong { color: #1a7c3e; }
+
+/* ── Gráfico SVG ─────────────────────────────────────────────────────── */
+
+.hawd-obj-chart { padding: 14px 16px; min-height: 80px; }
+.hawd-obj-empty {
+    text-align: center;
+    color: #888;
+    font-style: italic;
+    margin: 20px 0;
+}
+.hawd-obj-bar-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 90px 70px;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+.hawd-obj-bar-name {
+    font-weight: 600;
+    color: #1d2327;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.hawd-obj-bar-track {
+    position: relative;
+    height: 22px;
+    background: #f0f0f1;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.hawd-obj-bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: linear-gradient(90deg, #2271b1, #4a90c2);
+    border-radius: 4px;
+    transition: width .3s ease;
+}
+.hawd-obj-bar-fill.is-below {
+    /* real < piso → rojo */
+    background: linear-gradient(90deg, #c0392b, #e57373);
+}
+.hawd-obj-bar-fill.is-between {
+    /* piso ≤ real < techo → ámbar */
+    background: linear-gradient(90deg, #d4a017, #f4c578);
+}
+.hawd-obj-bar-fill.is-overflow {
+    /* real ≥ techo → verde */
+    background: linear-gradient(90deg, #1a7c3e, #2db365);
+}
+.hawd-obj-bar-target {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+}
+.hawd-obj-bar-target.hawd-obj-bar-target-piso  { background: #d4a017; }
+.hawd-obj-bar-target.hawd-obj-bar-target-techo { background: #c0392b; }
+.hawd-obj-bar-amount {
+    text-align: right;
+    font-weight: 700;
+    color: #1d2327;
+    font-variant-numeric: tabular-nums;
+}
+.hawd-obj-bar-pct {
+    text-align: right;
+    font-weight: 700;
+    color: #2271b1;
+    font-variant-numeric: tabular-nums;
+}
+.hawd-obj-bar-pct.is-met { color: #1a7c3e; }
+.hawd-obj-bar-pct.is-mid { color: #8a5a00; }
+.hawd-obj-bar-pct.is-low { color: #c0392b; }
+
+.hawd-obj-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: #555;
+    padding: 4px 0 12px;
+}
+.hawd-obj-legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-right: 5px;
+    vertical-align: middle;
+}
+.hawd-obj-legend-swatch.is-real        { background: #2271b1; }
+.hawd-obj-legend-swatch.is-below       { background: #c0392b; }
+.hawd-obj-legend-swatch.is-between     { background: #d4a017; }
+.hawd-obj-legend-swatch.is-overflow    { background: #1a7c3e; }
+.hawd-obj-legend-swatch.is-target-piso  { background: #d4a017; width: 2px; height: 14px; }
+.hawd-obj-legend-swatch.is-target-techo { background: #c0392b; width: 2px; height: 14px; }
+
+/* ── Tabla desglose ──────────────────────────────────────────────────── */
+
+.hawd-obj-table-wrap { padding: 0; overflow-x: auto; }
+.hawd-obj-table {
+    width: 100%;
+    margin: 0;
+    border: 0;
+    font-size: 13px;
+}
+.hawd-obj-table th,
+.hawd-obj-table td {
+    padding: 8px 10px;
+    vertical-align: middle;
+}
+.hawd-obj-table thead th {
+    background: #f6f7f7;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: .4px;
+    color: #555;
+}
+.hawd-obj-table .hawd-obj-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.hawd-obj-table tbody td.hawd-obj-num { color: #1d2327; }
+.hawd-obj-table tbody td.is-zero { color: #bbb; }
+.hawd-obj-table tfoot th {
+    background: #fafafa;
+    font-weight: 800;
+    border-top: 2px solid #dcdcde;
+}
+.hawd-obj-table tfoot .hawd-obj-num { color: #1a7c3e; }

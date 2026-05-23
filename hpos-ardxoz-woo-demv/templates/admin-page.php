@@ -16,6 +16,45 @@ if (!defined('ABSPATH')) {
 ?>
 <div class="hawd-wrap">
 
+    <!-- ═══ ESTADÍSTICAS ═══ -->
+    <div class="hawd-stats-card" id="hawd_stats_card">
+        <div class="hawd-stats-header">
+            <h3 class="hawd-stats-title">
+                <span class="dashicons dashicons-chart-bar"></span>
+                Estadísticas
+                <span class="hawd-stats-count" id="hawd_stats_count">— pedidos</span>
+            </h3>
+        </div>
+
+        <div class="hawd-stats-grid">
+            <div class="hawd-stat-tile hawd-stat-deposit">
+                <span class="hawd-stat-label">Total Depositado</span>
+                <span class="hawd-stat-value" id="hawd_stat_depositado">—</span>
+            </div>
+            <div class="hawd-stat-tile hawd-stat-total">
+                <span class="hawd-stat-label">Total</span>
+                <span class="hawd-stat-value" id="hawd_stat_total">—</span>
+            </div>
+            <div class="hawd-stat-tile hawd-stat-shipping">
+                <span class="hawd-stat-label">Total Costo de Envío</span>
+                <span class="hawd-stat-value" id="hawd_stat_envio">—</span>
+                <span class="hawd-stat-sub" id="hawd_stat_envio_sub"></span>
+            </div>
+            <div class="hawd-stat-tile hawd-stat-ibex"
+                 title="7% retenido por IBEX en pedidos con envío IBEX y pago Contra Entrega">
+                <span class="hawd-stat-label">7% IBEX no depositado</span>
+                <span class="hawd-stat-value" id="hawd_stat_ibex">—</span>
+                <span class="hawd-stat-sub" id="hawd_stat_ibex_sub">Retención de envío IBEX y pago Pago Contra Entrega</span>
+            </div>
+            <div class="hawd-stat-tile hawd-stat-diff"
+                 title="Diferencia: monto depositado − importe esperado (con descuento 7% en IBEX-COD), solo pedidos con depósito registrado. Los top-ups en curso se reportan aparte.">
+                <span class="hawd-stat-label">Diferencia</span>
+                <span class="hawd-stat-value" id="hawd_stat_diff">—</span>
+                <div class="hawd-stat-breakdown" id="hawd_stat_diff_breakdown"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ FILTROS ═══ -->
     <div class="hawd-filters-card">
         <div class="hawd-filters-row">
@@ -179,77 +218,33 @@ if (!defined('ABSPATH')) {
         </div>
     </div>
 
-    <!-- ═══ ESTADÍSTICAS ═══ -->
-    <div class="hawd-stats-card" id="hawd_stats_card">
-        <div class="hawd-stats-header">
-            <h3 class="hawd-stats-title">
-                <span class="dashicons dashicons-chart-bar"></span>
-                Estadísticas
-                <span class="hawd-stats-count" id="hawd_stats_count">— pedidos</span>
-            </h3>
-            <button type="button" class="hawd-stats-toggle-users" id="hawd_stats_toggle_users"
-                    aria-expanded="false">
-                Venta total por usuario
-                <span class="hawd-stats-toggle-icon">&#9662;</span>
-            </button>
-        </div>
-
-        <div class="hawd-stats-grid">
-            <div class="hawd-stat-tile hawd-stat-deposit">
-                <span class="hawd-stat-label">Total Depositado</span>
-                <span class="hawd-stat-value" id="hawd_stat_depositado">—</span>
-            </div>
-            <div class="hawd-stat-tile hawd-stat-total">
-                <span class="hawd-stat-label">Total</span>
-                <span class="hawd-stat-value" id="hawd_stat_total">—</span>
-            </div>
-            <div class="hawd-stat-tile hawd-stat-shipping">
-                <span class="hawd-stat-label">Total Costo de Envío</span>
-                <span class="hawd-stat-value" id="hawd_stat_envio">—</span>
-                <span class="hawd-stat-sub" id="hawd_stat_envio_sub"></span>
-            </div>
-            <div class="hawd-stat-tile hawd-stat-ibex"
-                 title="7% retenido por IBEX en pedidos con envío IBEX y pago Contra Entrega">
-                <span class="hawd-stat-label">7% IBEX no depositado</span>
-                <span class="hawd-stat-value" id="hawd_stat_ibex">—</span>
-                <span class="hawd-stat-sub" id="hawd_stat_ibex_sub">— pedidos IBEX-COD</span>
-            </div>
-        </div>
-
-        <div class="hawd-stats-users" id="hawd_stats_users" hidden>
-            <div class="hawd-stats-users-wrap">
-                <table class="hawd-stats-users-table">
-                    <thead>
-                        <tr>
-                            <th class="hawd-su-rank">#</th>
-                            <th class="hawd-su-user">Usuario</th>
-                            <th class="hawd-su-count">Pedidos</th>
-                            <th class="hawd-su-total">Venta Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="hawd_stats_users_body"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
     <!-- ═══ BARRA DE ACCIONES ═══ -->
     <div class="hawd-actions-bar">
-        <div class="hawd-actions-left">
+        <div class="hawd-actions-summary-row">
             <span id="hawd_summary" class="hawd-summary">Cargando...</span>
         </div>
-        <div class="hawd-actions-right">
+        <div class="hawd-actions-buttons-row">
             <button id="hawd_btn_deposit" class="button button-primary" disabled>
                 Completar Depósito
             </button>
 
             <button id="hawd_btn_pago_envio" class="button button-secondary" disabled>
-                Pagar Envío
+                Pagar Envíos Seleccionados
             </button>
 
             <button id="hawd_btn_pago_envio_all" class="button button-secondary"
                     title="Registra fecha de pago de envío para todos los pedidos que cumplan los filtros activos">
-                Pagar Envío TODOS los filtrados
+                Pagar Envíos Filtrados
+            </button>
+
+            <button id="hawd_btn_marcar_revision" class="button button-secondary" disabled
+                    title="Marcar como revisados solo los pedidos seleccionados">
+                Marcar Revisión Seleccionados
+            </button>
+
+            <button id="hawd_btn_marcar_revision_all" class="button button-secondary"
+                    title="Marca el campo de Arqueo como Ok para todos los pedidos que cumplan los filtros activos">
+                Marcar Revisión Filtrados
             </button>
 
             <form id="hawd_csv_form" method="post"
@@ -287,19 +282,20 @@ if (!defined('ABSPATH')) {
                     <th class="hawd-col-status">Estado</th>
                     <th class="hawd-col-payment">Pago</th>
                     <th class="hawd-col-state">Depto.</th>
-                    <th class="hawd-col-shipping">Envío</th>
-                    <th class="hawd-col-cost">C. Envío</th>
                     <th class="hawd-col-fdeposit">F. Dep.</th>
                     <th class="hawd-col-ndeposit">Nro. Dep.</th>
                     <th class="hawd-col-total">Total</th>
                     <th class="hawd-col-mdeposit">Monto Dep.</th>
+                    <th class="hawd-col-arqueo">Revisión</th>
                     <th class="hawd-col-return">F. Retorno</th>
+                    <th class="hawd-col-shipping">Envío</th>
+                    <th class="hawd-col-cost">C. Envío</th>
                     <th class="hawd-col-fpago">F. Pago Envío</th>
                 </tr>
             </thead>
             <tbody id="hawd_tbody">
                 <tr>
-                    <td colspan="15" class="hawd-loading">
+                    <td colspan="16" class="hawd-loading">
                         <span class="hawd-spinner"></span> Cargando pedidos...
                     </td>
                 </tr>
@@ -331,11 +327,34 @@ if (!defined('ABSPATH')) {
                     <input type="text" id="hawd_m_comprobante" class="widefat"
                            placeholder="Número de comprobante bancario">
                 </div>
+                <div class="hawd-field hawd-field-monto">
+                    <label for="hawd_m_monto_real">Monto real depositado (Bs)</label>
+                    <input type="number" step="0.01" min="0" id="hawd_m_monto_real" class="widefat"
+                           placeholder="0,00" inputmode="decimal" autocomplete="off">
+                </div>
             </div>
 
             <div class="hawd-modal-totals">
                 <span id="hawd_m_count">0 pedidos seleccionados</span>
                 <span id="hawd_m_total" class="hawd-total-display">0,00 Bs</span>
+            </div>
+
+            <div class="hawd-modal-diff" id="hawd_m_diff_box">
+                <span class="hawd-diff-line">
+                    <span class="hawd-diff-label">Esperado:</span>
+                    <span class="hawd-diff-val" id="hawd_m_esperado">0,00 Bs</span>
+                </span>
+                <span class="hawd-diff-sep">·</span>
+                <span class="hawd-diff-line">
+                    <span class="hawd-diff-label">Diferencia:</span>
+                    <span class="hawd-diff-val" id="hawd_m_diff_val">0,00 Bs</span>
+                </span>
+            </div>
+
+            <div class="hawd-field hawd-field-absorber" id="hawd_m_absorber_box" style="display:none;">
+                <label for="hawd_m_absorber">Aplicar diferencia a guía</label>
+                <select id="hawd_m_absorber" class="widefat"></select>
+                <small class="hawd-absorber-hint" id="hawd_m_absorber_hint"></small>
             </div>
 
             <div class="hawd-modal-detail-wrap">

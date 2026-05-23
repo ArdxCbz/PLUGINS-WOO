@@ -87,6 +87,15 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                           || !empty($search_terms);
 
         if ($needs_post_filter && !empty($order_ids)) {
+            // Pre-filtro SQL por sucursal (evita N×M get_product() en el loop).
+            if ($sucursal_filter && $sucursal_filter !== 'ALL') {
+                $tax_map = self::get_orders_taxonomies($order_ids);
+                $order_ids = array_values(array_filter($order_ids, function ($oid) use ($tax_map, $sucursal_filter) {
+                    $info = $tax_map[(int) $oid] ?? null;
+                    return $info && in_array($sucursal_filter, $info['sucursales'], true);
+                }));
+            }
+
             $filtered_ids = array();
 
             foreach ($order_ids as $oid) {
@@ -125,13 +134,6 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                 // Filtro: departamento (billing_state) — cualquiera de los seleccionados
                 if (!empty($billing_arr)) {
                     if (!in_array($order->get_billing_state(), $billing_arr, true)) {
-                        continue;
-                    }
-                }
-
-                // Filtro: sucursal (atributo de producto pa_sucursal)
-                if ($sucursal_filter && $sucursal_filter !== 'ALL') {
-                    if (!in_array($sucursal_filter, self::get_order_sucursales($order), true)) {
                         continue;
                     }
                 }
@@ -223,11 +225,14 @@ class HPOS_Ardxoz_Woo_DEMV_Query
      * sin necesidad de cargar cada WC_Order. Usa SQL sobre wc_orders y wc_orders_meta.
      *
      * Retorna sumas de:
-     *  - total_depositado  (meta _hpos_ardxoz_woo_monto_deposito  | legacy IMPORTE_DEPOSITADO)
-     *  - total_orders      (wc_orders.total_amount)
-     *  - total_costo_envio (meta _hpos_ardxoz_woo_costo_envio     | legacy costo_courier)
-     *  - ibex_no_depositado(7% retenido por IBEX en pedidos IBEX + Pago Contra Entrega)
-     *  - por_usuario       (suma de total_amount agrupado por customer_id, ordenado desc)
+     *  - total_depositado       (meta _hpos_ardxoz_woo_monto_deposito | legacy IMPORTE_DEPOSITADO)
+     *  - total_orders           (wc_orders.total_amount)
+     *  - total_costo_envio      (meta _hpos_ardxoz_woo_costo_envio    | legacy costo_courier)
+     *  - ibex_no_depositado     (7% retenido por IBEX en pedidos IBEX + Pago Contra Entrega)
+     *  - diferencia_total       (Σ monto_depositado − esperado, donde esperado = Calculator::calcular() — para IBEX-COD ya descuenta el 7%. Excluye top-ups en curso.)
+     *  - diferencia_por_metodo  (mismo cálculo agrupado por título del método de envío)
+     *  - pending_topup_total    (Σ negativos de absorbers rezagados: con depósito previo + estado no terminal + faltante)
+     *  - pending_topup_count    (nº de pedidos en estado de top-up pendiente)
      *
      * @param int[] $order_ids
      * @return array
@@ -235,17 +240,31 @@ class HPOS_Ardxoz_Woo_DEMV_Query
     public static function compute_stats($order_ids)
     {
         $empty = array(
-            'count'              => 0,
-            'total_depositado'   => 0.0,
-            'total_orders'       => 0.0,
-            'total_costo_envio'  => 0.0,
-            'ibex_no_depositado' => 0.0,
-            'ibex_count'         => 0,
-            'por_usuario'        => array(),
+            'count'                 => 0,
+            'total_depositado'      => 0.0,
+            'total_orders'          => 0.0,
+            'total_costo_envio'     => 0.0,
+            'ibex_no_depositado'    => 0.0,
+            'ibex_count'            => 0,
+            'diferencia_total'      => 0.0,
+            'diferencia_por_metodo' => array(),
+            'pending_topup_total'   => 0.0,
+            'pending_topup_count'   => 0,
         );
 
         if (empty($order_ids)) {
             return $empty;
+        }
+
+        // Cache: invalidado por bump de hawd_stats_version (en hooks de pedidos).
+        // Se incluye HAWD_VERSION para invalidar automáticamente al actualizar el
+        // plugin si cambia el shape del payload (campos nuevos, etc.).
+        $version   = (string) get_option('hawd_stats_version', '0');
+        $plugin_v  = defined('HAWD_VERSION') ? (string) HAWD_VERSION : '';
+        $cache_key = 'hawd_stats_' . md5($plugin_v . '|' . $version . '|' . implode(',', array_map('intval', $order_ids)));
+        $cached    = get_transient($cache_key);
+        if (is_array($cached)) {
+            return $cached;
         }
 
         global $wpdb;
@@ -257,9 +276,12 @@ class HPOS_Ardxoz_Woo_DEMV_Query
         $total_depositado        = 0.0;
         $total_costo_envio       = 0.0;
         $total_costo_envio_ibex  = 0.0;
-        $ibex_no_depositado      = 0.0;
-        $ibex_count              = 0;
-        $user_totals             = array(); // customer_id => ['cnt'=>n,'total'=>x]
+        $diff_por_metodo         = array(); // metodo => ['cnt' => n, 'diff' => float]
+        $pending_topup_total     = 0.0;
+        $pending_topup_count     = 0;
+
+        // Estados terminales: el pedido ya no admite más depósitos.
+        $terminal_statuses = array('wc-completed', 'wc-cancelled', 'wc-refunded', 'wc-failed');
 
         // Procesa en lotes para evitar IN(...) excesivamente grandes
         $chunks = array_chunk(array_map('intval', $order_ids), 1000);
@@ -267,25 +289,27 @@ class HPOS_Ardxoz_Woo_DEMV_Query
         foreach ($chunks as $chunk) {
             $placeholders = implode(',', array_fill(0, count($chunk), '%d'));
 
-            // Total de pedidos + agrupado por usuario en una sola pasada
+            // 1. Total + total por pedido + payment_method_title + status
+            //    (necesarios para distinguir IBEX-COD y top-ups en curso).
             $rows_o = $wpdb->get_results($wpdb->prepare(
-                "SELECT customer_id, total_amount
+                "SELECT id, total_amount, payment_method_title, status
                  FROM {$orders_table}
                  WHERE id IN ($placeholders)",
                 $chunk
             ));
+            $total_per_order   = array();
+            $payment_per_order = array();
+            $status_per_order  = array();
             foreach ($rows_o as $r) {
+                $oid = (int) $r->id;
                 $amt = (float) $r->total_amount;
                 $total_orders += $amt;
-                $cid = intval($r->customer_id);
-                if (!isset($user_totals[$cid])) {
-                    $user_totals[$cid] = array('cnt' => 0, 'total' => 0.0);
-                }
-                $user_totals[$cid]['cnt']   += 1;
-                $user_totals[$cid]['total'] += $amt;
+                $total_per_order[$oid]   = $amt;
+                $payment_per_order[$oid] = (string) $r->payment_method_title;
+                $status_per_order[$oid]  = (string) $r->status;
             }
 
-            // Monto depositado (HPOS preferente, fallback legacy)
+            // 2. Monto depositado (HPOS preferente, fallback legacy)
             $rows_d = $wpdb->get_results($wpdb->prepare(
                 "SELECT order_id,
                         MAX(CASE WHEN meta_key = '_hpos_ardxoz_woo_monto_deposito' THEN meta_value END) AS hpos,
@@ -296,26 +320,40 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                  GROUP BY order_id",
                 $chunk
             ));
+            $monto_per_order = array();
             foreach ($rows_d as $r) {
                 $val = ($r->hpos !== null && $r->hpos !== '') ? $r->hpos : $r->legacy;
                 if ($val !== null && $val !== '') {
-                    $total_depositado += (float) $val;
+                    $m = (float) $val;
+                    $total_depositado += $m;
+                    if ($m > 0) {
+                        $monto_per_order[(int) $r->order_id] = $m;
+                    }
                 }
             }
 
-            // IDs del chunk con envío IBEX (para splitear costo total vs costo IBEX)
-            $ibex_ids_args = array_merge($chunk, array(HPOS_Ardxoz_Woo_DEMV_Calculator::SHIPPING_IBEX));
-            $ibex_ids = $wpdb->get_col($wpdb->prepare(
-                "SELECT DISTINCT oi.order_id
-                 FROM {$items_table} oi
-                 WHERE oi.order_id IN ($placeholders)
-                   AND oi.order_item_type = 'shipping'
-                   AND oi.order_item_name = %s",
-                $ibex_ids_args
+            // 3. Métodos de envío del chunk: primer método por pedido + ibex_set
+            $rows_s = $wpdb->get_results($wpdb->prepare(
+                "SELECT order_id, order_item_name
+                 FROM {$items_table}
+                 WHERE order_item_type = 'shipping'
+                   AND order_id IN ($placeholders)",
+                $chunk
             ));
-            $ibex_set = array_flip(array_map('intval', $ibex_ids));
+            $shipping_per_order = array();
+            $ibex_set           = array();
+            foreach ($rows_s as $r) {
+                $oid  = (int) $r->order_id;
+                $name = (string) $r->order_item_name;
+                if (!isset($shipping_per_order[$oid])) {
+                    $shipping_per_order[$oid] = $name;
+                }
+                if ($name === HPOS_Ardxoz_Woo_DEMV_Calculator::SHIPPING_IBEX) {
+                    $ibex_set[$oid] = true;
+                }
+            }
 
-            // Costo de envío (HPOS preferente, fallback legacy)
+            // 4. Costo de envío (HPOS preferente, fallback legacy)
             $rows_c = $wpdb->get_results($wpdb->prepare(
                 "SELECT order_id,
                         MAX(CASE WHEN meta_key = '_hpos_ardxoz_woo_costo_envio' THEN meta_value END) AS hpos,
@@ -337,66 +375,66 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                 }
             }
 
-            // 7% IBEX no depositado: pedidos con envío IBEX + pago "Pago Contra Entrega"
-            // Replica la condición exacta del Calculator (FEE_IBEX_COD).
-            $args_ibex = array_merge(
-                $chunk,
-                array(
-                    HPOS_Ardxoz_Woo_DEMV_Calculator::PAYMENT_COD,
-                    HPOS_Ardxoz_Woo_DEMV_Calculator::SHIPPING_IBEX,
-                )
-            );
-            $rows_ibex = $wpdb->get_results($wpdb->prepare(
-                "SELECT o.total_amount
-                 FROM {$orders_table} o
-                 WHERE o.id IN ($placeholders)
-                   AND o.payment_method_title = %s
-                   AND EXISTS (
-                       SELECT 1 FROM {$items_table} oi
-                       WHERE oi.order_id = o.id
-                         AND oi.order_item_type = 'shipping'
-                         AND oi.order_item_name = %s
-                   )",
-                $args_ibex
-            ));
-            foreach ($rows_ibex as $r) {
-                $ibex_no_depositado += (float) $r->total_amount * HPOS_Ardxoz_Woo_DEMV_Calculator::FEE_IBEX_COD;
-                $ibex_count++;
+            // 5. Diferencia por método (solo pedidos con depósito registrado).
+            //    diff = monto_depositado − esperado, donde esperado descuenta el 7%
+            //    en IBEX+COD (mismo cálculo que Calculator::calcular). Así la
+            //    retención IBEX deja de aparecer como diferencia falsa.
+            //
+            //    Los absorbers rezagados (estado no terminal + faltante) NO entran
+            //    al breakdown — se reportan aparte como pending_topup_total.
+            foreach ($monto_per_order as $oid => $monto) {
+                $total = $total_per_order[$oid] ?? 0.0;
+                if ($total <= 0) continue;
+                $metodo  = $shipping_per_order[$oid] ?? '(Sin envío)';
+                $payment = $payment_per_order[$oid] ?? '';
+                $status  = $status_per_order[$oid]  ?? '';
+
+                $expected = HPOS_Ardxoz_Woo_DEMV_Calculator::is_ibex_cod($metodo, $payment)
+                    ? round($total * (1 - HPOS_Ardxoz_Woo_DEMV_Calculator::FEE_IBEX_COD), 2)
+                    : round($total, 2);
+
+                $delta = round($monto - $expected, 2);
+
+                // Top-up en curso: faltante + pedido aún abierto.
+                $is_topup_pending = ($delta < -0.01) && !in_array($status, $terminal_statuses, true);
+
+                if ($is_topup_pending) {
+                    $pending_topup_total += $delta;
+                    $pending_topup_count++;
+                    continue;
+                }
+
+                if (!isset($diff_por_metodo[$metodo])) {
+                    $diff_por_metodo[$metodo] = array('cnt' => 0, 'diff' => 0.0);
+                }
+                $diff_por_metodo[$metodo]['cnt']++;
+                $diff_por_metodo[$metodo]['diff'] += $delta;
             }
         }
 
-        // Resolver nombres de usuario y ordenar por total descendente
-        uasort($user_totals, function ($a, $b) {
-            if ($a['total'] === $b['total']) return 0;
-            return ($a['total'] < $b['total']) ? 1 : -1;
+        // Aplanar diferencia por método y total
+        $diferencia_total      = 0.0;
+        $diferencia_por_metodo = array();
+        foreach ($diff_por_metodo as $metodo => $d) {
+            $diff_round = round($d['diff'], 2);
+            $diferencia_total += $diff_round;
+            $diferencia_por_metodo[] = array(
+                'metodo' => $metodo,
+                'count'  => (int) $d['cnt'],
+                'diff'   => $diff_round,
+            );
+        }
+        usort($diferencia_por_metodo, function ($a, $b) {
+            return strcmp($a['metodo'], $b['metodo']);
         });
 
-        $por_usuario = array();
-        foreach ($user_totals as $uid => $data) {
-            $uid = intval($uid);
-            if ($uid > 0) {
-                $user = get_userdata($uid);
-                if ($user) {
-                    $login = $user->user_login;
-                    $name  = $user->display_name ?: $user->user_login;
-                } else {
-                    $login = "#{$uid}";
-                    $name  = "#{$uid}";
-                }
-            } else {
-                $login = '(invitado)';
-                $name  = 'Invitado';
-            }
-            $por_usuario[] = array(
-                'user_id'    => $uid,
-                'user_login' => $login,
-                'name'       => $name,
-                'count'      => intval($data['cnt']),
-                'total'      => round((float) $data['total'], 2),
-            );
-        }
+        // Retención 7% IBEX+COD — fuente única de verdad en Calculator
+        // (en vez de replicar aquí la regla de cálculo).
+        $ibex_retention     = HPOS_Ardxoz_Woo_DEMV_Calculator::sum_ibex_cod_retention($order_ids);
+        $ibex_no_depositado = (float) $ibex_retention['retained'];
+        $ibex_count         = (int) $ibex_retention['count'];
 
-        return array(
+        $stats = array(
             'count'                  => count($order_ids),
             'total_depositado'       => round($total_depositado, 2),
             'total_orders'           => round($total_orders, 2),
@@ -404,8 +442,14 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             'total_costo_envio_ibex' => round($total_costo_envio_ibex, 2),
             'ibex_no_depositado'     => round($ibex_no_depositado, 2),
             'ibex_count'             => $ibex_count,
-            'por_usuario'            => $por_usuario,
+            'diferencia_total'       => round($diferencia_total, 2),
+            'diferencia_por_metodo'  => $diferencia_por_metodo,
+            'pending_topup_total'    => round($pending_topup_total, 2),
+            'pending_topup_count'    => $pending_topup_count,
         );
+
+        set_transient($cache_key, $stats, 5 * MINUTE_IN_SECONDS);
+        return $stats;
     }
 
     /**
@@ -454,35 +498,46 @@ class HPOS_Ardxoz_Woo_DEMV_Query
         $monto_deposito   = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_monto_deposito');
         $fecha_retorno    = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_fecha_retorno');
         $fecha_pago_envio = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_fecha_pago_envio');
+        $checkbox_arqueo  = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_checkbox_arqueo');
 
         $has_deposit     = ($monto_deposito !== '' && floatval($monto_deposito) > 0);
         $has_pago_envio  = ($fecha_pago_envio !== '' && $fecha_pago_envio !== null);
+        $has_arqueo_ok   = ((string) $checkbox_arqueo === '1');
 
-        // Importe calculado (para modal)
-        $importe_calculado = HPOS_Ardxoz_Woo_DEMV_Calculator::calcular($order);
+        // Para top-ups (absorber rezagado), `importe_calculado` refleja el
+        // faltante real a depositar ahora, no el calcular() completo. Esto
+        // mantiene la modal y los sumarios coherentes con el plan del backend.
+        $topup_info        = HPOS_Ardxoz_Woo_DEMV_Calculator::get_topup_info($order);
+        $is_top_up         = (bool) $topup_info;
+        $importe_calculado = HPOS_Ardxoz_Woo_DEMV_Calculator::pending_amount($order);
 
         return array(
-            'id'                    => $order->get_id(),
-            'date'                  => $order_date,
-            'user_login'            => $user_login,
-            'order_number'          => $order->get_order_number(),
-            'postcode'              => $order->get_shipping_postcode(),
-            'status'                => $status_key,
-            'status_label'          => $status_label,
-            'payment_method_title'  => $order->get_payment_method_title(),
-            'billing_state_full'    => $billing_state_full,
-            'shipping_method_title' => $shipping_method_title,
-            'costo_envio'           => $costo_envio,
-            'fecha_deposito'        => $fecha_deposito,
-            'numero_deposito'       => $numero_deposito,
-            'order_total'           => (float) $order->get_total(),
-            'monto_deposito'        => $monto_deposito,
-            'fecha_retorno'         => $fecha_retorno,
-            'fecha_pago_envio'      => $fecha_pago_envio,
-            'has_deposit'           => $has_deposit,
-            'has_pago_envio'        => $has_pago_envio,
-            'importe_calculado'     => $importe_calculado,
-            'edit_url'              => $order->get_edit_order_url(),
+            'id'                     => $order->get_id(),
+            'date'                   => $order_date,
+            'user_login'             => $user_login,
+            'order_number'           => $order->get_order_number(),
+            'postcode'               => $order->get_shipping_postcode(),
+            'status'                 => $status_key,
+            'status_label'           => $status_label,
+            'payment_method_title'   => $order->get_payment_method_title(),
+            'billing_state_full'     => $billing_state_full,
+            'shipping_method_title'  => $shipping_method_title,
+            'costo_envio'            => $costo_envio,
+            'fecha_deposito'         => $fecha_deposito,
+            'numero_deposito'        => $numero_deposito,
+            'order_total'            => (float) $order->get_total(),
+            'monto_deposito'         => $monto_deposito,
+            'fecha_retorno'          => $fecha_retorno,
+            'fecha_pago_envio'       => $fecha_pago_envio,
+            'checkbox_arqueo'        => $checkbox_arqueo,
+            'has_deposit'            => $has_deposit,
+            'has_pago_envio'         => $has_pago_envio,
+            'has_arqueo_ok'          => $has_arqueo_ok,
+            'importe_calculado'      => $importe_calculado,
+            'is_top_up'              => $is_top_up,
+            'prior_monto_deposito'   => $is_top_up ? $topup_info['prior_monto'] : 0.0,
+            'prior_numero_deposito'  => $is_top_up ? $topup_info['prior_num']   : '',
+            'edit_url'               => $order->get_edit_order_url(),
         );
     }
 
@@ -634,6 +689,8 @@ class HPOS_Ardxoz_Woo_DEMV_Query
      * Devuelve las sucursales (en mayúsculas) presentes en los productos del pedido,
      * leyendo el atributo de producto `pa_sucursal`.
      *
+     * Para conjuntos de pedidos preferir `get_orders_taxonomies()` que evita N×M queries.
+     *
      * @param WC_Order $order
      * @return string[]
      */
@@ -647,6 +704,161 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             if ($suc !== '') $sucursales[$suc] = true;
         }
         return array_keys($sucursales);
+    }
+
+    /**
+     * Versión masiva de `get_order_sucursales` que también detecta la categoría
+     * `tienda`. Resuelve en una sola tanda SQL en vez de N×M llamadas a
+     * `wc_get_product` + `get_attribute`.
+     *
+     * Para variaciones, prioriza `wp_woocommerce_order_itemmeta.pa_sucursal`
+     * (slug específico de la variación elegida por el cliente). Solo cae a las
+     * term_relationships del producto cuando el item no tiene ese itemmeta —
+     * típicamente productos simples sin variaciones.
+     *
+     * @param int[] $order_ids
+     * @return array<int, array{sucursales: string[], has_tienda: bool}>
+     */
+    public static function get_orders_taxonomies($order_ids)
+    {
+        $result = array();
+        if (empty($order_ids)) {
+            return $result;
+        }
+
+        global $wpdb;
+        $ids = array_values(array_unique(array_filter(array_map('intval', $order_ids))));
+        if (empty($ids)) {
+            return $result;
+        }
+
+        $items_table = $wpdb->prefix . 'woocommerce_order_items';
+        $itemmeta    = $wpdb->prefix . 'woocommerce_order_itemmeta';
+        $tr_table    = $wpdb->prefix . 'term_relationships';
+        $tt_table    = $wpdb->prefix . 'term_taxonomy';
+        $terms_table = $wpdb->prefix . 'terms';
+
+        foreach ($ids as $oid) {
+            $result[$oid] = array('sucursales' => array(), 'has_tienda' => false);
+        }
+
+        $chunks = array_chunk($ids, 1000);
+        foreach ($chunks as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '%d'));
+
+            // 1) Items del chunk: order_id, product_id (padre) y pa_sucursal directa del item.
+            //    LEFT JOIN porque productos simples no tienen pa_sucursal a nivel item.
+            $items_rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT oi.order_id,
+                        CAST(pid.meta_value AS UNSIGNED) AS product_id,
+                        psuc.meta_value AS suc_slug
+                 FROM {$items_table} oi
+                 INNER JOIN {$itemmeta} pid
+                     ON pid.order_item_id = oi.order_item_id
+                    AND pid.meta_key = '_product_id'
+                 LEFT JOIN {$itemmeta} psuc
+                     ON psuc.order_item_id = oi.order_item_id
+                    AND psuc.meta_key = 'pa_sucursal'
+                 WHERE oi.order_item_type = 'line_item'
+                   AND oi.order_id IN ($placeholders)",
+                $chunk
+            ));
+
+            $used_slugs = array();
+            $pids_all   = array();
+            foreach ($items_rows as $r) {
+                $pid = (int) $r->product_id;
+                if ($pid > 0) $pids_all[$pid] = true;
+                $slug = trim((string) $r->suc_slug);
+                if ($slug !== '') $used_slugs[$slug] = true;
+            }
+
+            // 2) Resolver slug del item → nombre del término (en mayúsculas) para
+            //    que coincida con Config::SUCURSALES (ej: 'santa-cruz' → 'SANTA CRUZ').
+            $slug_to_name = array();
+            if (!empty($used_slugs)) {
+                $slugs   = array_keys($used_slugs);
+                $slug_ph = implode(',', array_fill(0, count($slugs), '%s'));
+                $term_rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT t.slug, t.name
+                     FROM {$tt_table} tt
+                     INNER JOIN {$terms_table} t ON t.term_id = tt.term_id
+                     WHERE tt.taxonomy = 'pa_sucursal'
+                       AND t.slug IN ($slug_ph)",
+                    $slugs
+                ));
+                foreach ($term_rows as $r) {
+                    $slug_to_name[(string) $r->slug] = strtoupper(trim((string) $r->name));
+                }
+            }
+
+            // 3) Term relationships del producto padre: para los items SIN pa_sucursal
+            //    directa (productos simples) y para detectar product_cat=tienda en TODOS.
+            $pid_sucursales = array();
+            $pid_tienda     = array();
+            if (!empty($pids_all)) {
+                $all_pids = array_keys($pids_all);
+                $pid_ph   = implode(',', array_fill(0, count($all_pids), '%d'));
+                $tax_rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT tr.object_id AS product_id, tt.taxonomy, t.name, t.slug
+                     FROM {$tr_table} tr
+                     INNER JOIN {$tt_table} tt
+                         ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                        AND tt.taxonomy IN ('pa_sucursal', 'product_cat')
+                     INNER JOIN {$terms_table} t
+                         ON t.term_id = tt.term_id
+                     WHERE tr.object_id IN ($pid_ph)",
+                    $all_pids
+                ));
+                foreach ($tax_rows as $r) {
+                    $pid = (int) $r->product_id;
+                    if ($r->taxonomy === 'pa_sucursal') {
+                        $name = strtoupper(trim((string) $r->name));
+                        if ($name !== '') {
+                            $pid_sucursales[$pid][$name] = true;
+                        }
+                    } elseif ($r->taxonomy === 'product_cat' && $r->slug === 'tienda') {
+                        $pid_tienda[$pid] = true;
+                    }
+                }
+            }
+
+            // 4) Combinar: por cada item, decidir su sucursal.
+            //    Regla: si el item tiene pa_sucursal directa → esa (variación elegida).
+            //           si no → todas las del producto padre (productos simples).
+            //    'tienda' siempre se evalúa por producto padre (no es atributo de variación).
+            foreach ($items_rows as $r) {
+                $oid = (int) $r->order_id;
+                if (!isset($result[$oid])) continue;
+                $pid  = (int) $r->product_id;
+                $slug = trim((string) $r->suc_slug);
+
+                if ($pid > 0 && !empty($pid_tienda[$pid])) {
+                    $result[$oid]['has_tienda'] = true;
+                }
+
+                if ($slug !== '') {
+                    $name = $slug_to_name[$slug] ?? '';
+                    if ($name === '') {
+                        // Fallback: el slug no se resolvió (término eliminado, etc.).
+                        // Normalizamos guiones → espacios para tolerar 'santa-cruz'.
+                        $name = strtoupper(str_replace('-', ' ', $slug));
+                    }
+                    $result[$oid]['sucursales'][$name] = true;
+                } elseif ($pid > 0 && !empty($pid_sucursales[$pid])) {
+                    foreach (array_keys($pid_sucursales[$pid]) as $name) {
+                        $result[$oid]['sucursales'][$name] = true;
+                    }
+                }
+            }
+        }
+
+        foreach ($result as $oid => &$v) {
+            $v['sucursales'] = array_keys($v['sucursales']);
+        }
+        unset($v);
+
+        return $result;
     }
 
     /**

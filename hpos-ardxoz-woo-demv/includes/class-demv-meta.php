@@ -58,4 +58,25 @@ class HPOS_Ardxoz_Woo_DEMV_Meta
 
         return '';
     }
+
+    /**
+     * Obtiene exclusivamente el valor de la meta HPOS, SIN fallback legacy.
+     *
+     * Pensado para los gates de "el pedido ya tiene depósito": pedidos con
+     * solo metas legacy ACF (depósitos de enero/febrero anteriores a HPOS)
+     * deben poder re-completarse para escribir las metas HPOS nuevas. Las
+     * legacy se conservan como backup.
+     *
+     * @param WC_Order $order
+     * @param string   $hpos_key
+     * @return string Valor HPOS, o '' si no existe (aunque haya legacy).
+     */
+    public static function get_hpos_only($order, $hpos_key)
+    {
+        $value = $order->get_meta($hpos_key, true);
+        if ($value !== '' && $value !== null && $value !== false) {
+            return $value;
+        }
+        return '';
+    }
 }

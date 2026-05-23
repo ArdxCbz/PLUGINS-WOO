@@ -180,8 +180,8 @@
 /* ── Barra de acciones ─────────────────────────── */
 .hawd-actions-bar {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    gap: 10px;
     margin: 12px 0;
     padding: 10px 16px;
     background: #f6f7f7;
@@ -189,14 +189,20 @@
     border-radius: 4px;
 }
 
-.hawd-actions-left {
-    flex: 1;
+.hawd-actions-summary-row {
+    padding-bottom: 8px;
+    border-bottom: 1px solid #dcdcde;
+    min-height: 22px;
+    display: flex;
+    align-items: center;
 }
 
-.hawd-actions-right {
+.hawd-actions-buttons-row {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     align-items: center;
+    justify-content: flex-end;
 }
 
 .hawd-summary {
@@ -277,6 +283,7 @@
 .hawd-col-total    { width: 80px; }
 .hawd-col-mdeposit { width: 80px; }
 .hawd-col-return   { width: 80px; }
+.hawd-col-arqueo   { width: 70px; text-align: center; }
 .hawd-col-fpago    { width: 90px; }
 
 /* Fila con depósito completado */
@@ -301,6 +308,80 @@
 }
 .hawd-row-deposited.hawd-row-pago-envio:hover {
     background: linear-gradient(90deg, #d8f0da 50%, #fbdcae 50%) !important;
+}
+
+/* Celda de Revisión (arqueo) — interruptor inline */
+.hawd-cell-arqueo { text-align: center; }
+.hawd-arqueo-switch {
+    position: relative;
+    display: inline-block;
+    width: 32px;
+    height: 18px;
+    vertical-align: middle;
+    cursor: pointer;
+    margin: 0;
+}
+.hawd-arqueo-switch input[type="checkbox"] {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+    margin: 0;
+}
+.hawd-arqueo-slider {
+    position: absolute;
+    inset: 0;
+    background: #c3c4c7;
+    border-radius: 18px;
+    transition: background-color .15s;
+}
+.hawd-arqueo-slider::before {
+    content: "";
+    position: absolute;
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    top: 2px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform .15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,.2);
+}
+.hawd-arqueo-switch input:checked + .hawd-arqueo-slider { background: #00a32a; }
+.hawd-arqueo-switch input:checked + .hawd-arqueo-slider::before { transform: translateX(14px); }
+.hawd-arqueo-switch input:focus-visible + .hawd-arqueo-slider {
+    box-shadow: 0 0 0 2px #2271b1;
+}
+.hawd-arqueo-switch.hawd-arqueo-saving {
+    opacity: 0.55;
+    pointer-events: none;
+}
+.hawd-arqueo-switch.hawd-arqueo-locked {
+    cursor: not-allowed;
+}
+.hawd-arqueo-switch.hawd-arqueo-locked .hawd-arqueo-slider {
+    background: #00a32a;
+    opacity: 0.85;
+}
+.hawd-arqueo-switch.hawd-arqueo-locked .hawd-arqueo-slider::after {
+    content: "\f160"; /* dashicons-lock */
+    font-family: dashicons;
+    position: absolute;
+    top: 50%;
+    left: 4px;
+    transform: translateY(-50%);
+    color: #fff;
+    font-size: 10px;
+    line-height: 1;
+}
+.hawd-arqueo-switch.hawd-arqueo-error .hawd-arqueo-slider {
+    background: #d63638;
+    animation: hawd-arqueo-shake .25s linear;
+}
+@keyframes hawd-arqueo-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-2px); }
+    75% { transform: translateX(2px); }
 }
 
 /* Fila seleccionada (prevalece sobre los anteriores) */
@@ -517,7 +598,7 @@
 /* Campos del modal */
 .hawd-modal-fields {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 12px;
     margin-bottom: 16px;
 }
@@ -525,6 +606,47 @@
 /* Modal en modo "Pagar Envío": una sola columna porque solo se pide la fecha */
 .hawd-modal-fields.hawd-modal-fields-single {
     grid-template-columns: 1fr;
+}
+
+/* Línea Esperado / Diferencia (modal Depósitos) */
+.hawd-modal-diff {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    background: #fafbfc;
+    border: 1px dashed #c3c4c7;
+    border-radius: 4px;
+    font-size: 12px;
+    flex-wrap: wrap;
+}
+.hawd-modal-diff .hawd-diff-label {
+    color: #50575e;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-right: 4px;
+}
+.hawd-modal-diff .hawd-diff-val {
+    font-weight: 700;
+    color: #1d2327;
+}
+.hawd-modal-diff .hawd-diff-val.hawd-diff-pos { color: #1a7c3e; }
+.hawd-modal-diff .hawd-diff-val.hawd-diff-neg { color: #b32d2e; }
+.hawd-modal-diff .hawd-diff-val.hawd-diff-zero { color: #a7aaad; font-weight: 500; }
+.hawd-modal-diff .hawd-diff-sep { color: #c3c4c7; }
+
+/* Selector de absorber */
+.hawd-field-absorber {
+    margin-bottom: 14px;
+}
+.hawd-absorber-hint {
+    display: block;
+    margin-top: 4px;
+    color: #50575e;
+    font-size: 11px;
+    font-style: italic;
 }
 
 .hawd-field label {
@@ -668,10 +790,8 @@
         max-width: 100%;
         width: 100%;
     }
-    .hawd-actions-bar {
-        flex-direction: column;
-        gap: 8px;
-        align-items: flex-start;
+    .hawd-actions-buttons-row {
+        justify-content: flex-start;
     }
     .hawd-modal-fields {
         grid-template-columns: 1fr;
@@ -779,7 +899,9 @@
     background: #fdecea;
     border-color: #c0392b;
 }
-/* Costo de envío bloqueado por pago registrado */
+/* Costo de envío bloqueado por pago registrado.
+   Usa fondo blanco sólido para contrastar SOBRE la fila naranja
+   (.hawd-row-pago-envio comparte el color #fdebd0). */
 .hawd-costo-locked {
     display: inline-flex;
     align-items: center;
@@ -788,11 +910,18 @@
     font-size: 12px;
     font-weight: 600;
     color: #6e5300;
-    background: #fdebd0;
+    background: #ffffff;
     border: 1px dashed #d4a017;
     border-radius: 3px;
     cursor: not-allowed;
     user-select: none;
+    box-shadow: 0 0 0 1px rgba(212, 160, 23, .15);
+}
+.hawd-row-pago-envio .hawd-costo-locked {
+    /* Sobre fila naranja: tono ámbar fuerte para sobresalir */
+    background: #fff8e1;
+    border-color: #b88a14;
+    color: #5a3e00;
 }
 .hawd-costo-locked .dashicons {
     font-size: 13px;
@@ -855,37 +984,6 @@
     margin-left: 4px;
 }
 
-.hawd-stats-toggle-users {
-    background: #f0f6fc;
-    border: 1px solid #c3d1e0;
-    color: #2271b1;
-    border-radius: 3px;
-    padding: 5px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: background-color .15s, border-color .15s;
-}
-.hawd-stats-toggle-users:hover {
-    background: #e2eef9;
-    border-color: #2271b1;
-}
-.hawd-stats-toggle-users.is-open {
-    background: #2271b1;
-    border-color: #2271b1;
-    color: #fff;
-}
-.hawd-stats-toggle-icon {
-    font-size: 10px;
-    transition: transform .15s;
-}
-.hawd-stats-toggle-users.is-open .hawd-stats-toggle-icon {
-    transform: rotate(180deg);
-}
-
 /* Tarjetas de totales */
 .hawd-stats-grid {
     display: grid;
@@ -927,6 +1025,9 @@
     font-weight: 500;
     margin-top: 2px;
 }
+/* El sub-texto del costo de envío lo rellena la caja de Traspasos; si ese
+   plugin no está cargado, queda vacío → no reservar espacio. */
+.hawd-stat-sub:empty { display: none; }
 
 .hawd-stat-deposit  { background: #ecf7ed; border-color: #b7dfbf; }
 .hawd-stat-deposit  .hawd-stat-value { color: #1a7c3e; }
@@ -938,71 +1039,58 @@
 .hawd-stat-ibex     .hawd-stat-value { color: #b32d2e; }
 .hawd-stat-ibex     .hawd-stat-sub   { color: #8a1f21; }
 
-/* Panel desplegable de usuarios */
-.hawd-stats-users {
-    margin-top: 12px;
-    border: 1px solid #dcdcde;
-    border-radius: 4px;
-    background: #fafbfc;
-}
+/* Tile de Diferencia: el value cambia color según signo (verde / rojo / neutro). */
+.hawd-stat-diff     { background: #f6f7f7; border-color: #c3c4c7; }
+.hawd-stat-diff     .hawd-stat-value           { color: #1d2327; }
+.hawd-stat-diff     .hawd-stat-value.hawd-diff-pos { color: #1a7c3e; }
+.hawd-stat-diff     .hawd-stat-value.hawd-diff-neg { color: #b32d2e; }
 
-.hawd-stats-users-wrap {
-    max-height: 320px;
+/* Desglose por método (lista compacta dentro del tile Diferencia) */
+.hawd-stat-breakdown {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed #c3c4c7;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 140px;
     overflow-y: auto;
-    border-radius: 4px;
 }
-
-.hawd-stats-users-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-}
-
-.hawd-stats-users-table thead th {
-    position: sticky;
-    top: 0;
-    background: #f0f0f1;
-    padding: 8px 10px;
-    text-align: left;
+.hawd-bd-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
     font-size: 11px;
-    font-weight: 700;
+    line-height: 1.4;
+}
+.hawd-bd-name {
+    color: #50575e;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.hawd-bd-val {
+    font-weight: 700;
+    white-space: nowrap;
     color: #1d2327;
-    border-bottom: 1px solid #c3c4c7;
 }
-
-.hawd-stats-users-table tbody td {
-    padding: 6px 10px;
-    border-bottom: 1px solid #f0f0f1;
-    vertical-align: middle;
+.hawd-bd-pos  .hawd-bd-val { color: #1a7c3e; }
+.hawd-bd-neg  .hawd-bd-val { color: #b32d2e; }
+.hawd-bd-zero .hawd-bd-val { color: #a7aaad; font-weight: 500; }
+/* Top-ups en curso: separados del breakdown por método, en azul. */
+.hawd-bd-pending {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dotted #c3c4c7;
 }
-
-.hawd-stats-users-table tbody tr:nth-child(even) {
-    background: #f6f7f7;
-}
-.hawd-stats-users-table tbody tr:hover {
-    background: #e8f0fe;
-}
-.hawd-stats-users-table tbody tr:last-child td {
-    border-bottom: 0;
-}
-
-.hawd-su-rank  { width: 36px; color: #646970; font-weight: 600; }
-.hawd-su-user  { color: #1d2327; }
-.hawd-su-count { width: 80px; text-align: center; color: #50575e; }
-.hawd-su-total { width: 130px; text-align: right; font-weight: 700; color: #135e96; white-space: nowrap; }
-
-.hawd-su-login {
-    color: #646970;
-    font-weight: 400;
+.hawd-bd-pending .hawd-bd-name { color: #135e96; }
+.hawd-bd-pending .hawd-bd-val  { color: #135e96; }
+.hawd-bd-empty {
     font-size: 11px;
-}
-
-.hawd-su-empty {
-    text-align: center;
-    padding: 16px !important;
-    color: #646970;
+    color: #a7aaad;
     font-style: italic;
 }
 

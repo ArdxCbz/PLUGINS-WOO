@@ -7,6 +7,12 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
 {
     const META_KEY = '_hpos_ardxoz_woo_monto_efectivo';
 
+    /**
+     * Versión del esquema de la tabla `wp_hawd_caja_retiros`.
+     * Incrementar cuando cambie el CREATE TABLE para que admin_init aplique dbDelta.
+     */
+    const DB_VERSION = '2';
+
     private static function table()
     {
         global $wpdb;
@@ -15,25 +21,12 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
 
     private static function is_admin_user()
     {
-        $roles = (array) wp_get_current_user()->roles;
-        return !empty(array_intersect(['administrator', 'shop_manager'], $roles));
+        return HPOS_Ardxoz_Woo_DEMV_Permisos::is_admin();
     }
 
     private static function can_access()
     {
-        $uid   = get_current_user_id();
-        $roles = (array) wp_get_current_user()->roles;
-
-        if (!empty(array_intersect(['administrator', 'shop_manager'], $roles))) {
-            return true;
-        }
-
-        if (!in_array('vendedor', $roles, true)) {
-            return false;
-        }
-
-        $suc = (string) get_user_meta($uid, 'hawd_sucursal_caja', true);
-        return in_array($suc, ['COCHABAMBA', 'SANTA CRUZ'], true);
+        return HPOS_Ardxoz_Woo_DEMV_Permisos::can_access_caja();
     }
 
     // ── Tabla ─────────────────────────────────────────────────────────────────
@@ -58,7 +51,9 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
   status varchar(20) NOT NULL DEFAULT 'pendiente',
   aprobado_por bigint(20) unsigned DEFAULT NULL,
   aprobado_en datetime DEFAULT NULL,
-  PRIMARY KEY  (id)
+  PRIMARY KEY  (id),
+  KEY idx_status (status),
+  KEY idx_usuario (usuario_id)
 ) $charset;";
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -124,7 +119,6 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
             exit;
         }
 
-        self::ensure_table();
         $wpdb->insert(self::table(), [
             'fecha'      => current_time('mysql'),
             'monto'      => $monto,
@@ -180,9 +174,9 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
         $fecha           = sanitize_text_field($_POST['fecha'] ?? '');
         $numero_deposito = sanitize_text_field($_POST['numero_deposito'] ?? '');
 
-        if ($id <= 0)                     wp_send_json_error(['message' => 'Retiro inválido.']);
-        if ($fecha === '')                wp_send_json_error(['message' => 'Falta la fecha de depósito.']);
-        if ($numero_deposito === '')      wp_send_json_error(['message' => 'Falta el número de depósito.']);
+        if ($id <= 0)                wp_send_json_error(['message' => 'Retiro inválido.']);
+        if ($fecha === '')           wp_send_json_error(['message' => 'Falta la fecha de depósito.']);
+        if ($numero_deposito === '') wp_send_json_error(['message' => 'Falta el número de depósito.']);
 
         global $wpdb;
 
@@ -195,14 +189,19 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
             wp_send_json_error(['message' => 'Retiro no encontrado o ya procesado.']);
         }
 
-        $order_ids = json_decode($retiro->order_ids ?? '[]', true) ?: [];
-        $results   = [];
+        $order_ids  = json_decode($retiro->order_ids ?? '[]', true) ?: [];
+        $results    = [];
         $procesados = 0;
+        $errors     = 0;
 
         foreach ($order_ids as $oid) {
             $order = wc_get_order(intval($oid));
             if (!$order) {
-                $results[] = ['id' => intval($oid), 'status' => 'error', 'reason' => 'Pedido no encontrado'];
+                // Pedido eliminado entre solicitud y aprobación: no bloquea el retiro.
+                $results[] = [
+                    'id' => intval($oid), 'status' => 'skipped',
+                    'reason' => 'Pedido no encontrado',
+                ];
                 continue;
             }
 
@@ -215,23 +214,48 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
                 continue;
             }
 
-            $num_actual   = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_numero_deposito');
+            $num_actual = HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_numero_deposito');
+
+            // Idempotencia: si este nº ya se aplicó en un intento previo (retiro
+            // que quedó parcial), omitir para no concatenar dos veces.
+            // Asume que los nºs de depósito no contienen el separador '-'.
+            $tokens = $num_actual !== '' ? explode('-', (string) $num_actual) : [];
+            if (in_array($numero_deposito, $tokens, true)) {
+                $results[] = [
+                    'id'     => intval($oid),
+                    'number' => $order->get_order_number(),
+                    'status' => 'skipped',
+                    'reason' => 'Ya aplicado al nº ' . $numero_deposito,
+                ];
+                continue;
+            }
+
             $monto_actual = floatval(HPOS_Ardxoz_Woo_DEMV_Meta::get($order, '_hpos_ardxoz_woo_monto_deposito'));
             $total_pedido = floatval($order->get_total());
 
             $nuevo_numero = $num_actual !== '' ? $num_actual . '-' . $numero_deposito : $numero_deposito;
+            $nuevo_monto  = round($monto_actual + $monto_efectivo, 2);
+
             $order->update_meta_data('_hpos_ardxoz_woo_numero_deposito', $nuevo_numero);
-
-            $nuevo_monto = round($monto_actual + $monto_efectivo, 2);
-            $order->update_meta_data('_hpos_ardxoz_woo_monto_deposito', $nuevo_monto);
-
-            $order->update_meta_data('_hpos_ardxoz_woo_fecha_deposito', $fecha);
+            $order->update_meta_data('_hpos_ardxoz_woo_monto_deposito',  $nuevo_monto);
+            $order->update_meta_data('_hpos_ardxoz_woo_fecha_deposito',  $fecha);
 
             if ($nuevo_monto >= round($total_pedido, 2)) {
                 $order->set_status('completed');
             }
 
-            $order->save();
+            try {
+                $order->save();
+            } catch (Exception $e) {
+                $results[] = [
+                    'id'     => intval($oid),
+                    'number' => $order->get_order_number(),
+                    'status' => 'error',
+                    'reason' => 'Error al guardar: ' . $e->getMessage(),
+                ];
+                $errors++;
+                continue;
+            }
 
             $nota = sprintf(
                 "Retiro aprobado:\nFecha depósito: %s\nNº depósito: %s\nMonto efectivo aplicado: %s Bs\nTotal depósito acumulado: %s Bs",
@@ -249,6 +273,28 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
                 'monto_efectivo' => $monto_efectivo,
             ];
             $procesados++;
+        }
+
+        // Si algún save falló: NO marcar el retiro como aprobado.
+        // El admin puede reintentar — los pedidos ya procesados se omiten por idempotencia.
+        if ($errors > 0) {
+            $failed = [];
+            foreach ($results as $r) {
+                if ($r['status'] === 'error') {
+                    $failed[] = '#' . ($r['number'] ?? $r['id']);
+                }
+            }
+            wp_send_json_error([
+                'message'   => sprintf(
+                    'Aprobación parcial: %d procesados, %d errores (%s). El retiro queda pendiente para reintento.',
+                    $procesados,
+                    $errors,
+                    implode(', ', $failed)
+                ),
+                'results'   => $results,
+                'processed' => $procesados,
+                'errors'    => $errors,
+            ]);
         }
 
         $wpdb->update(
@@ -274,36 +320,19 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
 
     // ── Helpers de sucursal ───────────────────────────────────────────────────
 
-    private static function get_order_sucursales($order)
+    /**
+     * Aplica la regla de sucursal usando un bulk map ya calculado.
+     * Evita cargar el producto por cada item N×M veces.
+     *
+     * @param array $info ['sucursales' => string[], 'has_tienda' => bool]
+     */
+    private static function order_matches_sucursal_data($sucursal, $info)
     {
-        $sucursales = [];
-        foreach ($order->get_items() as $item) {
-            $product = $item->get_product();
-            if (!$product) continue;
-            $suc = strtoupper(trim($product->get_attribute('pa_sucursal')));
-            if ($suc !== '') $sucursales[$suc] = true;
-        }
-        return array_keys($sucursales);
-    }
-
-    private static function order_has_tienda_category($order)
-    {
-        foreach ($order->get_items() as $item) {
-            $product_id = $item->get_product_id();
-            if ($product_id && has_term('tienda', 'product_cat', $product_id)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static function order_matches_sucursal($order, $sucursal)
-    {
-        if (in_array($sucursal, self::get_order_sucursales($order), true)) {
+        if (in_array($sucursal, $info['sucursales'] ?? [], true)) {
             return true;
         }
         // SANTA CRUZ también recibe los pedidos con productos de categoría "tienda"
-        if ($sucursal === 'SANTA CRUZ' && self::order_has_tienda_category($order)) {
+        if ($sucursal === 'SANTA CRUZ' && !empty($info['has_tienda'])) {
             return true;
         }
         return false;
@@ -317,7 +346,6 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
             wp_die('No tienes permisos para acceder a esta sección.', 'Sin acceso', ['response' => 403, 'back_link' => true]);
         }
 
-        self::ensure_table();
         global $wpdb;
 
         $is_admin = self::is_admin_user();
@@ -362,12 +390,23 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
         $filas = [];
 
         if (!$sin_sucursal) {
+            // Pre-calcular taxonomías de TODOS los pedidos en una sola query SQL
+            // (en vez de N×M get_product()->get_attribute('pa_sucursal') por item).
+            $tax_map = [];
+            if ($filtro_sucursal !== '') {
+                $oids_for_tax = array_map(fn($o) => $o->get_id(), $orders);
+                $tax_map = HPOS_Ardxoz_Woo_DEMV_Query::get_orders_taxonomies($oids_for_tax);
+            }
+
             foreach ($orders as $order) {
                 $monto = floatval($order->get_meta(self::META_KEY));
                 if ($monto <= 0) continue;
-                // Filtrar por sucursal si aplica
-                if ($filtro_sucursal !== '' && !self::order_matches_sucursal($order, $filtro_sucursal)) continue;
-                $oid    = $order->get_id();
+                $oid = $order->get_id();
+                // Filtrar por sucursal si aplica (usando map cacheado)
+                if ($filtro_sucursal !== ''
+                    && !self::order_matches_sucursal_data($filtro_sucursal, $tax_map[$oid] ?? [])) {
+                    continue;
+                }
                 $retiro = $order_retiro_map[$oid] ?? null;
                 // Excluir pedidos ya aprobados — desaparecen del listado
                 if ($retiro && $retiro->status === 'aprobado') continue;
@@ -656,7 +695,6 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
     {
         if (!self::is_admin_user()) return;
 
-        self::ensure_table();
         global $wpdb;
 
         $pendientes = $wpdb->get_results(

@@ -1,0 +1,256 @@
+/* ── Depósitos Express ─────────────────────────────────────────────────── */
+
+.hawd-dx-wrap { max-width: 1100px; }
+
+.hawd-dx-intro { color: #555; font-size: 13px; margin: 6px 0 14px; }
+
+.hawd-dx-searchbox {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 6px;
+    padding: 14px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.04);
+}
+.hawd-dx-searchbox textarea {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    resize: vertical;
+}
+.hawd-dx-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+.hawd-dx-spinner {
+    color: #2271b1;
+    font-size: 12px;
+    font-style: italic;
+}
+
+/* ── Resumen ─────────────────────────────────────────────────────────── */
+
+.hawd-dx-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 14px 0 0;
+}
+.hawd-dx-stat {
+    flex: 1;
+    min-width: 130px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 5px;
+    padding: 10px 12px;
+    text-align: center;
+}
+.hawd-dx-stat-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: #777;
+    margin-bottom: 4px;
+}
+.hawd-dx-stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: #1d2327;
+}
+.hawd-dx-stat-warn   { color: #b26b00; }
+.hawd-dx-stat-amount { color: #1a7c3e; }
+.hawd-dx-stat-discount { color: #c0392b; }
+
+/* ── Mensajes ─────────────────────────────────────────────────────────── */
+
+.hawd-dx-missing,
+.hawd-dx-skipped {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 5px;
+    font-size: 12px;
+    word-break: break-all;
+}
+.hawd-dx-missing { background: #fdecea; color: #721c24; border: 1px solid #f5c6cb; }
+.hawd-dx-skipped { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+
+/* ── Tabla ────────────────────────────────────────────────────────────── */
+
+#hawd_dx_table { margin-top: 14px; font-size: 13px; }
+#hawd_dx_table th {
+    background: #f0f0f0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    padding: 6px 8px;
+}
+#hawd_dx_table td { padding: 6px 8px; vertical-align: middle; }
+#hawd_dx_table tr.hawd-dx-row-ibex td { background: #fff8ec; }
+#hawd_dx_table tr.hawd-dx-row-topup td { background: #eef6ff; }
+#hawd_dx_table tr.hawd-dx-row-topup.hawd-dx-row-ibex td { background: #f3f0e6; }
+.hawd-dx-badge-topup { background: #1f7adb !important; }
+.hawd-dx-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #fde68a;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.hawd-dx-amount       { font-weight: 700; }
+.hawd-dx-amount-final { font-weight: 700; color: #1a7c3e; }
+.hawd-dx-amount-strike { color: #999; text-decoration: line-through; font-size: 11px; }
+.hawd-dx-discount-line { display: block; font-size: 10px; color: #c0392b; }
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+
+.hawd-dx-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    background: #e8f0fe;
+    border: 1px solid #b3c7f7;
+    border-radius: 5px;
+    flex-wrap: wrap;
+}
+.hawd-dx-footer-info { font-size: 13px; color: #2c5282; }
+.hawd-dx-footer-info strong { color: #1a7c3e; }
+
+/* ── Modal ────────────────────────────────────────────────────────────── */
+
+.hawd-dx-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 100000;
+}
+.hawd-dx-modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100001;
+    width: 480px;
+    max-width: 92vw;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+    overflow: hidden;
+}
+.hawd-dx-modal.is-open,
+.hawd-dx-overlay.is-open { display: block; }
+
+.hawd-dx-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: #2271b1;
+    color: #fff;
+}
+.hawd-dx-modal-header h3 { color: #fff; margin: 0; font-size: 15px; }
+.hawd-dx-modal-close {
+    background: none;
+    border: 0;
+    color: #fff;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+.hawd-dx-modal-body  { padding: 16px; }
+.hawd-dx-modal-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+}
+.hawd-dx-field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: #555;
+    margin-bottom: 3px;
+}
+.hawd-dx-modal-totals {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 14px;
+    padding: 8px 10px;
+    background: #f6f7f7;
+    border-radius: 4px;
+    font-size: 12px;
+}
+.hawd-dx-total-display { font-size: 14px; font-weight: 800; color: #1a7c3e; }
+
+/* Línea Esperado / Diferencia (modal Express) */
+.hawd-dx-modal-diff {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: #fafbfc;
+    border: 1px dashed #c3c4c7;
+    border-radius: 4px;
+    font-size: 12px;
+    flex-wrap: wrap;
+}
+.hawd-dx-modal-diff .hawd-dx-diff-label {
+    color: #555;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-right: 4px;
+}
+.hawd-dx-modal-diff .hawd-dx-diff-val {
+    font-weight: 700;
+    color: #1d2327;
+}
+.hawd-dx-modal-diff .hawd-dx-diff-val.hawd-dx-diff-pos  { color: #1a7c3e; }
+.hawd-dx-modal-diff .hawd-dx-diff-val.hawd-dx-diff-neg  { color: #b32d2e; }
+.hawd-dx-modal-diff .hawd-dx-diff-val.hawd-dx-diff-zero { color: #a7aaad; font-weight: 500; }
+.hawd-dx-modal-diff .hawd-dx-diff-sep { color: #c3c4c7; }
+
+/* Selector de absorber (Express) */
+.hawd-dx-field-absorber {
+    margin-top: 10px;
+}
+.hawd-dx-absorber-hint {
+    display: block;
+    margin-top: 4px;
+    color: #555;
+    font-size: 11px;
+    font-style: italic;
+}
+.hawd-dx-modal-results {
+    margin-top: 12px;
+    padding: 10px;
+    background: #f0f6ff;
+    border: 1px solid #b3c7f7;
+    border-radius: 4px;
+    font-size: 12px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+.hawd-dx-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #f6f7f7;
+    border-top: 1px solid #dcdcde;
+}

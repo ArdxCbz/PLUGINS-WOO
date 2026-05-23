@@ -20,6 +20,7 @@ jQuery(function ($) {
     var isProcessing = false; // true solo mientras el AJAX de depósito está en vuelo
     var modalMode = 'orders'; // 'orders' (completar depósito) | 'retiro' (aprobar retiro) | 'pago_envio' (pagar envío)
     var currentRetiroId = null;
+    var modalItems = []; // Items del modal actual con {id, number, edit_url, importe}
 
     // ═══════════════════════════════════════════════
     //  INIT: Cargar datos al entrar
@@ -248,7 +249,7 @@ jQuery(function ($) {
     function loadOrders() {
         var $tbody = $('#hawd_tbody');
         $tbody.html(
-            '<tr><td colspan="15" class="hawd-loading">' +
+            '<tr><td colspan="16" class="hawd-loading">' +
             '<span class="hawd-spinner"></span> Cargando pedidos...</td></tr>'
         );
         $('#hawd_check_all').prop('checked', false);
@@ -264,7 +265,7 @@ jQuery(function ($) {
             .done(function (res) {
                 if (!res.success) {
                     $tbody.html(
-                        '<tr><td colspan="15" class="hawd-no-results">' +
+                        '<tr><td colspan="16" class="hawd-no-results">' +
                         (res.data && res.data.message ? res.data.message : 'Error al cargar') +
                         '</td></tr>'
                     );
@@ -283,7 +284,7 @@ jQuery(function ($) {
             })
             .fail(function () {
                 $tbody.html(
-                    '<tr><td colspan="15" class="hawd-no-results">' +
+                    '<tr><td colspan="16" class="hawd-no-results">' +
                     'Error de conexión. Intenta de nuevo.</td></tr>'
                 );
                 renderStats(null);
@@ -294,14 +295,17 @@ jQuery(function ($) {
     //  ESTADÍSTICAS GLOBALES (sobre todo el filtro, no la página)
     // ═══════════════════════════════════════════════
 
+    var IBEX_SUB_DEFAULT = 'Retención de envío IBEX y pago Pago Contra Entrega';
+
     function setStatsLoading() {
         $('#hawd_stats_count').text('Calculando...');
         $('#hawd_stat_depositado').text('—');
         $('#hawd_stat_total').text('—');
         $('#hawd_stat_envio').text('—');
         $('#hawd_stat_ibex').text('—');
-        $('#hawd_stat_ibex_sub').text('— pedidos IBEX-COD');
-        $('#hawd_stats_users_body').empty();
+        $('#hawd_stat_ibex_sub').text(IBEX_SUB_DEFAULT);
+        $('#hawd_stat_diff').text('—').removeClass('hawd-diff-pos hawd-diff-neg');
+        $('#hawd_stat_diff_breakdown').empty();
     }
 
     function renderStats(stats) {
@@ -311,8 +315,9 @@ jQuery(function ($) {
             $('#hawd_stat_total').text('—');
             $('#hawd_stat_envio').text('—');
             $('#hawd_stat_ibex').text('—');
-            $('#hawd_stat_ibex_sub').text('— pedidos IBEX-COD');
-            $('#hawd_stats_users_body').empty();
+            $('#hawd_stat_ibex_sub').text(IBEX_SUB_DEFAULT);
+            $('#hawd_stat_diff').text('—').removeClass('hawd-diff-pos hawd-diff-neg');
+            $('#hawd_stat_diff_breakdown').empty();
             return;
         }
 
@@ -323,51 +328,64 @@ jQuery(function ($) {
         $('#hawd_stat_total').text(fmtNum(stats.total_orders) + ' Bs');
         $('#hawd_stat_envio').text(fmtNum(stats.total_costo_envio) + ' Bs');
         $('#hawd_stat_ibex').text(fmtNum(stats.ibex_no_depositado) + ' Bs');
-        $('#hawd_stat_ibex_sub').text(
-            (stats.ibex_count || 0) + ' pedido' +
-            ((stats.ibex_count === 1) ? '' : 's') + ' IBEX-COD'
-        );
+        var ibexCount = parseInt(stats.ibex_count, 10) || 0;
+        var ibexSub   = IBEX_SUB_DEFAULT +
+            ' · ' + ibexCount + ' pedido' + (ibexCount === 1 ? '' : 's');
+        $('#hawd_stat_ibex_sub').text(ibexSub);
 
-        var $body = $('#hawd_stats_users_body').empty();
-        var users = stats.por_usuario || [];
+        // Diferencia: signo se refleja con clases (verde a favor, rojo en contra)
+        // diferencia_total ahora se calcula contra Calculator::calcular() (descuenta
+        // el 7% IBEX-COD) y EXCLUYE absorbers en curso — éstos se reportan aparte.
+        var diffTotal = parseFloat(stats.diferencia_total) || 0;
+        var $diff = $('#hawd_stat_diff')
+            .text(fmtSigned(diffTotal) + ' Bs')
+            .removeClass('hawd-diff-pos hawd-diff-neg');
+        if (diffTotal > 0)      $diff.addClass('hawd-diff-pos');
+        else if (diffTotal < 0) $diff.addClass('hawd-diff-neg');
 
-        if (users.length === 0) {
-            $body.append(
-                '<tr><td colspan="4" class="hawd-su-empty">Sin datos para el filtro actual.</td></tr>'
-            );
-            return;
+        var $bd = $('#hawd_stat_diff_breakdown').empty();
+        var rows = stats.diferencia_por_metodo || [];
+        if (rows.length === 0) {
+            $bd.append('<div class="hawd-bd-empty">Sin pedidos con depósito registrado.</div>');
+        } else {
+            rows.forEach(function (m) {
+                var v = parseFloat(m.diff) || 0;
+                var cls = v > 0 ? 'hawd-bd-pos' : (v < 0 ? 'hawd-bd-neg' : 'hawd-bd-zero');
+                var valStr = (v === 0) ? '—' : (fmtSigned(v) + ' Bs');
+                $bd.append(
+                    '<div class="hawd-bd-row ' + cls + '">' +
+                    '<span class="hawd-bd-name">' + esc(m.metodo) + ':</span>' +
+                    '<span class="hawd-bd-val">' + valStr + '</span>' +
+                    '</div>'
+                );
+            });
         }
 
-        users.forEach(function (u, i) {
-            var who = u.name && u.name !== u.user_login
-                ? esc(u.name) + ' <span class="hawd-su-login">(' + esc(u.user_login) + ')</span>'
-                : esc(u.user_login);
-            $body.append(
-                '<tr>' +
-                '<td class="hawd-su-rank">' + (i + 1) + '</td>' +
-                '<td class="hawd-su-user">' + who + '</td>' +
-                '<td class="hawd-su-count">' + u.count + '</td>' +
-                '<td class="hawd-su-total">' + fmtNum(u.total) + ' Bs</td>' +
-                '</tr>'
+        // Top-ups en curso (absorbers rezagados): se muestran aparte para que el
+        // operador sepa cuánto está pendiente de un próximo depósito complementario.
+        var pendingTotal = parseFloat(stats.pending_topup_total) || 0;
+        var pendingCount = parseInt(stats.pending_topup_count, 10) || 0;
+        if (pendingCount > 0) {
+            $bd.append(
+                '<div class="hawd-bd-row hawd-bd-pending">' +
+                '<span class="hawd-bd-name">Top-ups en curso (' + pendingCount + '):</span>' +
+                '<span class="hawd-bd-val">' + fmtSigned(pendingTotal) + ' Bs</span>' +
+                '</div>'
             );
-        });
+        }
 
         // Notifica a la caja de Traspasos para que recompute breakdown del envío
         $(document).trigger('hawd:stats-rendered', [stats]);
     }
 
-    // Toggle del panel "Venta total por usuario"
-    $(document).on('click', '#hawd_stats_toggle_users', function () {
-        var $panel = $('#hawd_stats_users');
-        var expanded = !$panel.attr('hidden');
-        if (expanded) {
-            $panel.attr('hidden', 'hidden');
-            $(this).attr('aria-expanded', 'false').removeClass('is-open');
-        } else {
-            $panel.removeAttr('hidden');
-            $(this).attr('aria-expanded', 'true').addClass('is-open');
-        }
-    });
+    // Formato con signo explícito ('+1.234,56' / '-1.234,56' / '0,00')
+    function fmtSigned(n) {
+        var num = parseFloat(n) || 0;
+        var s = fmtNum(Math.abs(num));
+        if (num > 0) return '+' + s;
+        if (num < 0) return '-' + s;
+        return s;
+    }
 
     // ═══════════════════════════════════════════════
     //  RENDERIZAR TABLA
@@ -378,7 +396,7 @@ jQuery(function ($) {
 
         if (!rows || rows.length === 0) {
             $tbody.html(
-                '<tr><td colspan="15" class="hawd-no-results">' +
+                '<tr><td colspan="16" class="hawd-no-results">' +
                 'No se encontraron pedidos con los filtros aplicados.</td></tr>'
             );
             return;
@@ -399,13 +417,14 @@ jQuery(function ($) {
                 '<td><span class="hawd-status-badge ' + statusClass + '">' + esc(r.status_label) + '</span></td>' +
                 '<td>' + esc(r.payment_method_title || '') + '</td>' +
                 '<td>' + esc(r.billing_state_full || '') + '</td>' +
-                '<td>' + esc(r.shipping_method_title || '') + '</td>' +
-                '<td class="hawd-cell-costo">' + costoEnvioInput(r) + '</td>' +
                 '<td>' + emptyCell(r.fecha_deposito) + '</td>' +
                 '<td>' + emptyCell(r.numero_deposito) + '</td>' +
                 '<td>' + fmtNum(r.order_total) + '</td>' +
                 '<td>' + formatMoney(r.monto_deposito) + '</td>' +
+                '<td class="hawd-cell-arqueo">' + revisionSwitch(r) + '</td>' +
                 '<td>' + emptyCell(r.fecha_retorno) + '</td>' +
+                '<td>' + esc(r.shipping_method_title || '') + '</td>' +
+                '<td class="hawd-cell-costo">' + costoEnvioInput(r) + '</td>' +
                 '<td>' + emptyCell(r.fecha_pago_envio) + '</td>' +
                 '</tr>'
             );
@@ -472,7 +491,7 @@ jQuery(function ($) {
 
         if (selCount > 0) {
             html += ' &nbsp;|&nbsp; <span class="hawd-sel-count">' + selCount + ' seleccionados</span>';
-            html += ' &nbsp;|&nbsp; Total depositado: <span class="hawd-sel-total">' + fmtNum(sumDepositado) + ' Bs</span>';
+            html += ' &nbsp;|&nbsp; Total a depositar: <span class="hawd-sel-total">' + fmtNum(sumDepositado) + ' Bs</span>';
             html += ' &nbsp;|&nbsp; Total: <span class="hawd-sel-order-total">' + fmtNum(sumOrderTotal) + ' Bs</span>';
             html += ' &nbsp;|&nbsp; Total costo de envío: <span class="hawd-sel-shipping">' + fmtNum(sumCostoEnvio) + ' Bs</span>';
         }
@@ -480,6 +499,7 @@ jQuery(function ($) {
         $('#hawd_summary').html(html);
         $('#hawd_btn_deposit').prop('disabled', selCount === 0);
         $('#hawd_btn_pago_envio').prop('disabled', selCount === 0);
+        $('#hawd_btn_marcar_revision').prop('disabled', selCount === 0);
     }
 
     // ═══════════════════════════════════════════════
@@ -544,7 +564,12 @@ jQuery(function ($) {
         $('#hawd_m_title').text('Completar Depósito Bancario');
 
         var items = rows.map(function (r) {
-            return { number: r.order_number, edit_url: r.edit_url, importe: r.importe_calculado || 0 };
+            return {
+                id: parseInt(r.id, 10),
+                number: r.order_number,
+                edit_url: r.edit_url,
+                importe: parseFloat(r.importe_calculado) || 0
+            };
         });
         var total = items.reduce(function (s, it) { return s + it.importe; }, 0);
         openDepositoModal(items, total);
@@ -560,7 +585,12 @@ jQuery(function ($) {
         $('#hawd_m_title').text('Registrar Pago de Envío');
 
         var items = rows.map(function (r) {
-            return { number: r.order_number, edit_url: r.edit_url, importe: parseFloat(r.costo_envio) || 0 };
+            return {
+                id: parseInt(r.id, 10),
+                number: r.order_number,
+                edit_url: r.edit_url,
+                importe: parseFloat(r.costo_envio) || 0
+            };
         });
         var total = items.reduce(function (s, it) { return s + it.importe; }, 0);
         openDepositoModal(items, total);
@@ -578,7 +608,7 @@ jQuery(function ($) {
 
         $.post(P.ajax_url, f)
             .done(function (res) {
-                $btn.prop('disabled', false).text('Pagar Envío TODOS los filtrados');
+                $btn.prop('disabled', false).text('Pagar Envíos Filtrados');
 
                 if (!res.success) {
                     alert((res.data && res.data.message) || 'Error al obtener pedidos elegibles');
@@ -597,10 +627,142 @@ jQuery(function ($) {
                 openPagoEnvioAllModal(d);
             })
             .fail(function () {
-                $btn.prop('disabled', false).text('Pagar Envío TODOS los filtrados');
+                $btn.prop('disabled', false).text('Pagar Envíos Filtrados');
                 alert('Error de conexión.');
             });
     });
+
+    // Marcar Revisión (solo seleccionados)
+    $('#hawd_btn_marcar_revision').on('click', function () {
+        var ids = getSelectedIds();
+        if (!ids.length) return;
+
+        if (!window.confirm('Marcar Revisión = Ok para ' + ids.length + ' pedido(s) seleccionados?')) return;
+
+        var $btn = $(this);
+        $btn.prop('disabled', true).text('Procesando...');
+
+        $.post(P.ajax_url, {
+            action:    'hawd_complete_revision',
+            nonce:     P.nonce,
+            order_ids: ids
+        })
+        .done(function (res) {
+            if (res.success && res.data) {
+                alert('Revisión marcada.\n' +
+                      'Procesados: ' + (res.data.processed || 0) + '\n' +
+                      'Omitidos: '  + (res.data.skipped   || 0) + '\n' +
+                      'Errores: '   + (res.data.errors    || 0));
+                loadOrders();
+            } else {
+                alert((res.data && res.data.message) || 'Error al marcar revisión');
+            }
+        })
+        .fail(function () {
+            alert('Error de conexión.');
+        })
+        .always(function () {
+            $btn.prop('disabled', false).text('Marcar Revisión Seleccionados');
+        });
+    });
+
+    // Marcar Revisión (todos los filtrados): setea _hpos_ardxoz_woo_checkbox_arqueo = '1'
+    // a todos los pedidos del filtro actual que aún no estén marcados.
+    $('#hawd_btn_marcar_revision_all').on('click', function () {
+        var $btn = $(this);
+        $btn.prop('disabled', true).text('Calculando...');
+
+        var f = getFilters();
+        f.action = 'hawd_get_revision_targets';
+        f.nonce  = P.nonce;
+
+        $.post(P.ajax_url, f)
+            .done(function (res) {
+                $btn.prop('disabled', false).text('Marcar Revisión Filtrados');
+
+                if (!res.success) {
+                    alert((res.data && res.data.message) || 'Error al obtener pedidos elegibles');
+                    return;
+                }
+
+                var d = res.data;
+                if (!d.count) {
+                    alert('No hay pedidos elegibles con los filtros actuales.\n' +
+                          'Total filtrados: ' + d.total_found + '\n' +
+                          'Ya marcados Ok: ' + d.skipped_marked);
+                    return;
+                }
+
+                var msg =
+                    'Se va a marcar Revisión = Ok para ' + d.count + ' pedido(s).\n' +
+                    'Total filtrados: ' + d.total_found + '\n' +
+                    'Ya marcados (omitidos): ' + d.skipped_marked + '\n\n' +
+                    '¿Confirmas la operación?';
+
+                if (!window.confirm(msg)) return;
+
+                runMarcarRevisionChunks(d.ids || []);
+            })
+            .fail(function () {
+                $btn.prop('disabled', false).text('Marcar Revisión Filtrados');
+                alert('Error de conexión.');
+            });
+    });
+
+    function runMarcarRevisionChunks(ids) {
+        if (!ids.length) return;
+
+        var $btn = $('#hawd_btn_marcar_revision_all');
+        var CHUNK_SIZE = 100;
+        var chunks = [];
+        for (var i = 0; i < ids.length; i += CHUNK_SIZE) {
+            chunks.push(ids.slice(i, i + CHUNK_SIZE));
+        }
+
+        var totals = { processed: 0, skipped: 0, errors: 0 };
+        var chunkIdx = 0;
+
+        function next() {
+            if (chunkIdx >= chunks.length) {
+                $btn.prop('disabled', false).text('Marcar Revisión Filtrados');
+                alert('Revisión marcada.\n' +
+                      'Procesados: ' + totals.processed + '\n' +
+                      'Omitidos: ' + totals.skipped + '\n' +
+                      'Errores: ' + totals.errors);
+                loadOrders();
+                return;
+            }
+
+            var chunk = chunks[chunkIdx];
+            var done  = chunkIdx * CHUNK_SIZE;
+            $btn.text('Procesando ' + (done + chunk.length) + ' / ' + ids.length + '...');
+
+            $.post(P.ajax_url, {
+                action:    'hawd_complete_revision',
+                nonce:     P.nonce,
+                order_ids: chunk
+            })
+            .done(function (res) {
+                if (res.success && res.data) {
+                    totals.processed += res.data.processed || 0;
+                    totals.skipped   += res.data.skipped   || 0;
+                    totals.errors    += res.data.errors    || 0;
+                } else {
+                    totals.errors += chunk.length;
+                }
+                chunkIdx++;
+                next();
+            })
+            .fail(function () {
+                totals.errors += chunk.length;
+                chunkIdx++;
+                next();
+            });
+        }
+
+        $btn.prop('disabled', true);
+        next();
+    }
 
     // Estado para el modo "todos los filtrados"
     var pagoEnvioAllIds = [];
@@ -665,22 +827,46 @@ jQuery(function ($) {
     function openDepositoModal(items, total) {
         $('#hawd_m_fecha').val('');
         $('#hawd_m_comprobante').val('');
+        $('#hawd_m_monto_real').val('');
         $('#hawd_m_results').hide().html('');
         $('#hawd_m_progress').hide().html('');
         enableModalControls(true);
 
+        modalItems = items.slice();
+
         // En modo "pago_envio" no se pide comprobante: ocultamos su campo
         var $compField   = $('#hawd_m_comprobante').closest('.hawd-field');
+        var $montoField  = $('#hawd_m_monto_real').closest('.hawd-field');
         var $fieldsGrid  = $('#hawd_m_fecha').closest('.hawd-modal-fields');
         var $fechaLabel  = $('label[for="hawd_m_fecha"]');
+        var $diffBox     = $('#hawd_m_diff_box');
+        var $absorberBox = $('#hawd_m_absorber_box');
+
+        var isOrders = (modalMode === 'orders');
         if (modalMode === 'pago_envio') {
             $compField.hide();
+            $montoField.hide();
+            $diffBox.hide();
+            $absorberBox.hide();
             $fieldsGrid.addClass('hawd-modal-fields-single');
             $fechaLabel.text('Fecha de Pago de Envío');
         } else {
             $compField.show();
             $fieldsGrid.removeClass('hawd-modal-fields-single');
             $fechaLabel.text('Fecha de Depósito');
+
+            if (isOrders) {
+                $montoField.show();
+                $diffBox.show();
+                // Pre-cargar absorber con todas las guías (oculto hasta que diff != 0)
+                buildAbsorberSelect(items);
+                $absorberBox.hide();
+            } else {
+                // modo retiro u otros: sin monto/absorber
+                $montoField.hide();
+                $diffBox.hide();
+                $absorberBox.hide();
+            }
         }
 
         var $detail = $('#hawd_m_detail').empty();
@@ -696,9 +882,64 @@ jQuery(function ($) {
 
         $('#hawd_m_count').text(items.length + ' pedido' + (items.length !== 1 ? 's' : ''));
         $('#hawd_m_total').text(fmtNum(total) + ' Bs');
+        $('#hawd_m_esperado').text(fmtNum(total) + ' Bs');
+        $('#hawd_m_diff_val').text('—').removeClass('hawd-diff-pos hawd-diff-neg hawd-diff-zero');
 
         $('#hawd_overlay').fadeIn(150);
         $('#hawd_modal').css('display', 'flex').hide().fadeIn(200);
+    }
+
+    // Construye el <select> del absorber con cada guía y su importe esperado.
+    function buildAbsorberSelect(items) {
+        var $sel = $('#hawd_m_absorber').empty();
+        items.forEach(function (it) {
+            var label = '#' + it.number + ' — ' + fmtNum(it.importe) + ' Bs esperado';
+            $sel.append('<option value="' + it.id + '">' + esc(label) + '</option>');
+        });
+    }
+
+    // Actualiza la línea Esperado/Diferencia y muestra/oculta el selector.
+    // Se dispara en cada cambio del input de monto real.
+    $(document).on('input change', '#hawd_m_monto_real', function () {
+        if (modalMode !== 'orders') return;
+        var monto = parseFloat(($(this).val() || '').replace(',', '.')) || 0;
+        var esperado = modalItems.reduce(function (s, it) { return s + (parseFloat(it.importe) || 0); }, 0);
+        var diff = Math.round((monto - esperado) * 100) / 100;
+
+        $('#hawd_m_esperado').text(fmtNum(esperado) + ' Bs');
+        var $val = $('#hawd_m_diff_val').removeClass('hawd-diff-pos hawd-diff-neg hawd-diff-zero');
+
+        if (monto <= 0) {
+            $val.text('—');
+            $('#hawd_m_absorber_box').hide();
+            return;
+        }
+
+        $val.text(fmtSignedSimple(diff) + ' Bs');
+        if (Math.abs(diff) <= 0.01) {
+            $val.addClass('hawd-diff-zero');
+            $('#hawd_m_absorber_box').hide();
+        } else {
+            $val.addClass(diff > 0 ? 'hawd-diff-pos' : 'hawd-diff-neg');
+            // Mostrar selector solo si hay >1 guía; con 1 guía el absorber es esa
+            if (modalItems.length > 1) {
+                var hint = (diff < 0)
+                    ? 'La guía elegida recibirá ' + fmtSignedSimple(diff) + ' Bs y NO se marcará como completada.'
+                    : 'La guía elegida recibirá +' + fmtNum(diff) + ' Bs y se marcará como completada.';
+                $('#hawd_m_absorber_hint').text(hint);
+                $('#hawd_m_absorber_box').show();
+            } else {
+                $('#hawd_m_absorber_box').hide();
+            }
+        }
+    });
+
+    function fmtSignedSimple(n) {
+        var num = parseFloat(n) || 0;
+        var s = fmtNum(Math.abs(num));
+        if (num > 0) return '+' + s;
+        if (num < 0) return '-' + s;
+        return s;
     }
 
     function closeModal() {
@@ -738,12 +979,34 @@ jQuery(function ($) {
 
         if (modalMode === 'retiro') {
             saveAprobarRetiro(currentRetiroId, fecha, comprobante);
-        } else {
-            saveCompletarDeposito(fecha, comprobante);
+            return;
         }
+
+        // Modo 'orders': requiere monto real depositado
+        var monto = parseFloat(($('#hawd_m_monto_real').val() || '').replace(',', '.'));
+        if (!monto || monto <= 0) {
+            showModalProgress('Ingresa el monto real depositado.', 'error');
+            return;
+        }
+        var esperado = modalItems.reduce(function (s, it) { return s + (parseFloat(it.importe) || 0); }, 0);
+        var diff = Math.round((monto - esperado) * 100) / 100;
+        var absorberId = null;
+        if (Math.abs(diff) > 0.01) {
+            if (modalItems.length === 1) {
+                absorberId = modalItems[0].id;
+            } else {
+                absorberId = parseInt($('#hawd_m_absorber').val(), 10) || 0;
+                if (!absorberId) {
+                    showModalProgress('Selecciona la guía que absorberá la diferencia.', 'error');
+                    return;
+                }
+            }
+        }
+
+        saveCompletarDeposito(fecha, comprobante, monto, absorberId);
     });
 
-    function saveCompletarDeposito(fecha, comprobante) {
+    function saveCompletarDeposito(fecha, comprobante, monto, absorberId) {
         var ids = getSelectedIds();
         if (ids.length === 0) {
             showModalProgress('No hay pedidos seleccionados.', 'error');
@@ -759,7 +1022,9 @@ jQuery(function ($) {
             nonce: P.nonce,
             order_ids: ids,
             fecha: fecha,
-            comprobante: comprobante
+            comprobante: comprobante,
+            monto_real: monto,
+            absorber_id: absorberId || 0
         })
         .done(function (res) {
             isProcessing = false;
@@ -966,7 +1231,7 @@ jQuery(function ($) {
 
     function enableModalControls(enabled) {
         $('#hawd_m_save, #hawd_m_cancel, #hawd_modal_close_x').prop('disabled', !enabled);
-        $('#hawd_m_fecha, #hawd_m_comprobante').prop('disabled', !enabled);
+        $('#hawd_m_fecha, #hawd_m_comprobante, #hawd_m_monto_real, #hawd_m_absorber').prop('disabled', !enabled);
     }
 
     function renderModalResults(results) {
@@ -1033,6 +1298,68 @@ jQuery(function ($) {
         if (!val || val === '') return '<span class="hawd-empty">—</span>';
         return esc(val);
     }
+
+    // ═══════════════════════════════════════════════
+    //  INLINE TOGGLE: Revisión (arqueo)
+    // ═══════════════════════════════════════════════
+
+    function revisionSwitch(r) {
+        if (r.has_arqueo_ok) {
+            // Bloqueado: una vez marcado, no puede desmarcarse desde la tabla.
+            return '<label class="hawd-arqueo-switch hawd-arqueo-locked" ' +
+                   'title="Revisión confirmada — bloqueada">' +
+                   '<input type="checkbox" class="hawd-arqueo-toggle" data-id="' + r.id + '" checked disabled>' +
+                   '<span class="hawd-arqueo-slider"></span>' +
+                   '</label>';
+        }
+        return '<label class="hawd-arqueo-switch" title="Marcar como revisado">' +
+               '<input type="checkbox" class="hawd-arqueo-toggle" data-id="' + r.id + '">' +
+               '<span class="hawd-arqueo-slider"></span>' +
+               '</label>';
+    }
+
+    // No togglear el checkbox de fila al interactuar con el switch
+    $(document).on('click mousedown', '.hawd-arqueo-switch', function (e) {
+        e.stopPropagation();
+    });
+
+    $(document).on('change', '.hawd-arqueo-toggle', function () {
+        var $inp = $(this);
+        var $sw  = $inp.closest('.hawd-arqueo-switch');
+        if ($sw.hasClass('hawd-arqueo-saving')) return;
+
+        var orderId = $inp.attr('data-id');
+        var checked = $inp.is(':checked') ? '1' : '0';
+
+        $sw.addClass('hawd-arqueo-saving');
+
+        $.post(P.ajax_url, {
+            action:   'hawd_toggle_revision',
+            nonce:    P.nonce,
+            order_id: orderId,
+            checked:  checked
+        })
+        .done(function (res) {
+            if (res.success && res.data && res.data.row) {
+                var newRow = res.data.row;
+                tableData = tableData.map(function (r) {
+                    return r.id === newRow.id ? newRow : r;
+                });
+            } else {
+                $inp.prop('checked', !$inp.prop('checked'));
+                $sw.addClass('hawd-arqueo-error');
+                setTimeout(function () { $sw.removeClass('hawd-arqueo-error'); }, 1500);
+            }
+        })
+        .fail(function () {
+            $inp.prop('checked', !$inp.prop('checked'));
+            $sw.addClass('hawd-arqueo-error');
+            setTimeout(function () { $sw.removeClass('hawd-arqueo-error'); }, 1500);
+        })
+        .always(function () {
+            $sw.removeClass('hawd-arqueo-saving');
+        });
+    });
 
     // ═══════════════════════════════════════════════
     //  INLINE EDIT: Costo de Envío
