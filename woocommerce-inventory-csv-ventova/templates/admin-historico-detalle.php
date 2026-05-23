@@ -1,0 +1,325 @@
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+/**
+ * Detalle / pantalla de captura de una sesión de conteo.
+ *
+ * @var array  $session     Fila de iem_count_sessions.
+ * @var array  $lines       Filas de iem_count_lines.
+ * @var array  $progress    ['total','contados','ok','revisar']
+ * @var array  $sucursales  Mapa slug => nombre.
+ * @var string $nonce       Nonce admin-post.
+ * @var string $ajax_nonce  Nonce AJAX (IEM_Ajax::NONCE_ACTION).
+ * @var array  $tipos       Mapa de tipos de merma.
+ * @var string $base_url    admin-post.php.
+ */
+$is_draft   = $session['status'] === 'draft';
+$suc_name   = $sucursales[$session['sucursal_slug']] ?? $session['sucursal_slug'];
+$back_url   = add_query_arg([
+    'post_type' => 'product',
+    'page'      => IEM_Admin::PAGE_HISTORICO,
+], admin_url('edit.php'));
+
+$export_url = add_query_arg([
+    'action'                 => 'iem_export_session',
+    'session_id'             => (int) $session['id'],
+    IEM_Admin::NONCE_FIELD   => $nonce,
+], $base_url);
+
+$reopen_url = add_query_arg([
+    'action'                 => 'iem_reopen_session',
+    'session_id'             => (int) $session['id'],
+    IEM_Admin::NONCE_FIELD   => $nonce,
+], $base_url);
+?>
+<div class="wrap">
+    <h1 class="wp-heading-inline">
+        Conteo <?php echo esc_html($session['period']); ?> — <?php echo esc_html($suc_name); ?>
+    </h1>
+    <a href="<?php echo esc_url($back_url); ?>" class="page-title-action">← Volver al histórico</a>
+    <a href="<?php echo esc_url($export_url); ?>" class="page-title-action">Descargar CSV</a>
+    <?php if (!$is_draft): ?>
+        <a href="<?php echo esc_url($reopen_url); ?>" class="page-title-action">Reabrir conteo</a>
+    <?php endif; ?>
+    <hr class="wp-header-end">
+
+    <div class="iem-meta">
+        <span><strong>Estado:</strong>
+            <?php if ($is_draft): ?>
+                <span style="color:#a67c00;font-weight:600;">Borrador (autoguardado)</span>
+            <?php else: ?>
+                <span style="color:#107010;font-weight:600;">Cerrado</span>
+            <?php endif; ?>
+        </span>
+        <span><strong>Progreso:</strong>
+            <?php echo (int) $progress['contados']; ?> / <?php echo (int) $progress['total']; ?> contados
+            · OK: <span style="color:#107010;font-weight:600;"><?php echo (int) $progress['ok']; ?></span>
+            · Revisar: <span style="color:#a00;font-weight:600;"><?php echo (int) $progress['revisar']; ?></span>
+        </span>
+        <span><strong>Creado:</strong> <?php echo esc_html($session['created_at']); ?></span>
+        <?php if ($session['closed_at']): ?>
+            <span><strong>Cerrado:</strong> <?php echo esc_html($session['closed_at']); ?></span>
+        <?php endif; ?>
+    </div>
+
+    <?php if ($is_draft): ?>
+        <p style="margin:14px 0;">
+            <button type="button" class="button button-primary" id="iem-close-session"
+                    data-session-id="<?php echo (int) $session['id']; ?>">
+                Cerrar conteo
+            </button>
+            <span style="color:#666;margin-left:10px;font-style:italic;">
+                Los conteos se guardan automáticamente. Cerrar el conteo bloquea la edición.
+            </span>
+        </p>
+    <?php endif; ?>
+
+    <input type="search" id="iem-search" placeholder="Buscar SKU o producto…"
+           style="min-width:280px;margin:8px 0;">
+
+    <table class="wp-list-table widefat fixed striped iem-table">
+        <thead>
+            <tr>
+                <th style="width:13%">SKU</th>
+                <th style="width:24%">Producto</th>
+                <th style="width:9%">Stock al inicio</th>
+                <th style="width:14%">Categoría</th>
+                <th style="width:13%">Notas</th>
+                <th style="width:11%">Conteo</th>
+                <th style="width:8%">Estado</th>
+                <th style="width:8%">Merma</th>
+            </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($lines as $l):
+            $status   = $l['status_at_count'] ?: 'Sin conteo';
+            $row_cls  = $status === 'OK' ? 'iem-row-ok' : ($status === 'Revisar' ? 'iem-row-revisar' : '');
+            $is_extra = !empty($l['is_extra']);
+            if ($is_extra) $row_cls .= ' iem-row-extra';
+        ?>
+            <tr class="<?php echo esc_attr(trim($row_cls)); ?>"
+                data-sku="<?php echo esc_attr(strtolower((string) $l['sku'])); ?>"
+                data-name="<?php echo esc_attr(strtolower((string) $l['name'])); ?>">
+                <td>
+                    <code><?php echo esc_html($l['sku'] ?: '—'); ?></code>
+                    <?php if ($is_extra): ?>
+                        <br><span class="iem-badge-extra">EXTRA</span>
+                    <?php endif; ?>
+                </td>
+                <td><?php echo esc_html($l['name']); ?></td>
+                <td><?php echo (int) $l['stock_at_count']; ?></td>
+                <td><?php echo esc_html($l['category']); ?></td>
+                <td style="font-size:12px;color:#555;"><?php echo esc_html($l['notes'] ?? ''); ?></td>
+                <td>
+                    <input type="number" min="0" step="1"
+                           class="iem-conteo small-text"
+                           data-session-id="<?php echo (int) $session['id']; ?>"
+                           data-line-id="<?php echo (int) $l['id']; ?>"
+                           data-stock="<?php echo (int) $l['stock_at_count']; ?>"
+                           value="<?php echo $l['counted_qty'] !== null ? (int) $l['counted_qty'] : ''; ?>"
+                           <?php disabled(!$is_draft); ?>
+                           style="width:100px;">
+                    <span class="iem-savestate" aria-live="polite"></span>
+                </td>
+                <td class="iem-estado iem-estado-<?php
+                    echo esc_attr(strtolower(str_replace(' ', '-', $status))); ?>">
+                    <?php echo esc_html($status); ?>
+                </td>
+                <td>
+                    <?php if ($is_extra || (int) $l['item_id'] === 0): ?>
+                        <span style="color:#888;font-size:12px;font-style:italic;">N/A</span>
+                    <?php else: ?>
+                        <button type="button" class="button button-small iem-merma-btn"
+                                data-item-id="<?php echo (int) $l['item_id']; ?>"
+                                data-name="<?php echo esc_attr((string) $l['name']); ?>"
+                                data-sucursal="<?php echo esc_attr((string) $l['sucursal_slug']); ?>"
+                                data-session-id="<?php echo (int) $session['id']; ?>">
+                            Merma
+                        </button>
+                    <?php endif; ?>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+
+<?php // ── Modal merma ─────────────────────────────────────────────────── ?>
+<div id="iem-merma-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;padding:20px;border-radius:6px;min-width:420px;max-width:90vw;">
+        <h2 style="margin-top:0;">Registrar merma</h2>
+        <p><strong>Producto:</strong> <span id="iem-m-name"></span></p>
+        <p>
+            <label>Cantidad:
+                <input type="number" id="iem-m-qty" min="1" step="1" value="1" style="width:100px;">
+            </label>
+        </p>
+        <p>
+            <label>Tipo:
+                <select id="iem-m-tipo">
+                    <?php foreach ($tipos as $slug => $name): ?>
+                        <option value="<?php echo esc_attr($slug); ?>"><?php echo esc_html($name); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+        </p>
+        <p>
+            <label>
+                <input type="checkbox" id="iem-m-decrement">
+                Descontar del stock de WooCommerce
+            </label>
+        </p>
+        <p id="iem-m-err" style="color:#a00;display:none;"></p>
+        <p style="text-align:right;">
+            <button type="button" class="button" id="iem-m-cancel">Cancelar</button>
+            <button type="button" class="button button-primary" id="iem-m-save">Guardar merma</button>
+        </p>
+    </div>
+</div>
+
+<style>
+.iem-meta { display:flex; gap:24px; flex-wrap:wrap; margin:14px 0; padding:10px 14px;
+            background:#f6f7f7; border-left:4px solid #2271b1; }
+.iem-meta span { font-size:13px; }
+.iem-table .iem-estado { font-weight:600; }
+.iem-table .iem-estado-ok       { color:#107010; }
+.iem-table .iem-estado-revisar  { color:#a00; }
+.iem-table .iem-estado-sin-conteo { color:#888; }
+.iem-table tbody tr.iem-row-ok      { background:#f1faf1 !important; }
+.iem-table tbody tr.iem-row-revisar { background:#fdecec !important; }
+.iem-table tbody tr.iem-row-extra   { box-shadow: inset 4px 0 0 #d68f00; }
+.iem-savestate { display:inline-block; margin-left:6px; font-size:12px; min-width:60px; }
+.iem-savestate.saving { color:#888; }
+.iem-savestate.saved  { color:#107010; }
+.iem-savestate.error  { color:#a00; }
+.iem-badge-extra { display:inline-block; background:#ffe7a0; color:#5a3d00;
+                   padding:1px 6px; border-radius:8px; font-size:10px;
+                   font-weight:700; letter-spacing:0.5px; }
+</style>
+
+<script>
+(function(){
+    window.IEM_AJAX = {
+        url:   <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>,
+        nonce: <?php echo wp_json_encode($ajax_nonce); ?>,
+        field: <?php echo wp_json_encode(IEM_Ajax::NONCE_FIELD); ?>
+    };
+
+    function post(action, data, cb) {
+        var form = new FormData();
+        form.append('action', action);
+        form.append(window.IEM_AJAX.field, window.IEM_AJAX.nonce);
+        Object.keys(data).forEach(function(k){ form.append(k, data[k]); });
+        fetch(window.IEM_AJAX.url, { method:'POST', credentials:'same-origin', body: form })
+            .then(function(r){ return r.json().then(function(j){ return { ok:r.ok, j:j }; }); })
+            .then(function(res){ cb(null, res); })
+            .catch(function(e){ cb(e); });
+    }
+
+    // ── Búsqueda en cliente ─────────────────────────────────────────────
+    var search = document.getElementById('iem-search');
+    if (search) {
+        search.addEventListener('input', function(){
+            var q = search.value.trim().toLowerCase();
+            document.querySelectorAll('.iem-table tbody tr').forEach(function(tr){
+                var hit = q === '' || (tr.dataset.sku||'').indexOf(q) >= 0
+                       || (tr.dataset.name||'').indexOf(q) >= 0;
+                tr.style.display = hit ? '' : 'none';
+            });
+        });
+    }
+
+    // ── Autosave del conteo ─────────────────────────────────────────────
+    var debouncers = new WeakMap();
+    document.addEventListener('input', function(e){
+        if (!e.target.classList.contains('iem-conteo')) return;
+        var input = e.target;
+        if (input.disabled) return;
+        clearTimeout(debouncers.get(input));
+        var state = input.parentNode.querySelector('.iem-savestate');
+        if (state) { state.className = 'iem-savestate saving'; state.textContent = 'guardando…'; }
+        debouncers.set(input, setTimeout(function(){
+            post('iem_save_line', {
+                session_id: input.dataset.sessionId,
+                line_id:    input.dataset.lineId,
+                qty:        input.value
+            }, function(err, res){
+                var row = input.closest('tr');
+                var estCell = row.querySelector('.iem-estado');
+                row.classList.remove('iem-row-ok','iem-row-revisar');
+                estCell.classList.remove('iem-estado-ok','iem-estado-revisar','iem-estado-sin-conteo');
+                if (err || !res.ok || !res.j.success) {
+                    if (state) { state.className = 'iem-savestate error'; state.textContent = '✗ error'; }
+                    return;
+                }
+                var status = res.j.data.status;
+                estCell.textContent = status;
+                if (status === 'OK')      { row.classList.add('iem-row-ok');      estCell.classList.add('iem-estado-ok'); }
+                if (status === 'Revisar') { row.classList.add('iem-row-revisar'); estCell.classList.add('iem-estado-revisar'); }
+                if (status === 'Sin conteo') { estCell.classList.add('iem-estado-sin-conteo'); }
+                if (state) { state.className = 'iem-savestate saved'; state.textContent = '✓ guardado'; }
+            });
+        }, 400));
+    });
+
+    // ── Cerrar sesión ───────────────────────────────────────────────────
+    var closeBtn = document.getElementById('iem-close-session');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function(){
+            if (!confirm('¿Cerrar el conteo? Bloqueará la edición. Podrás reabrirlo más tarde si hace falta.')) return;
+            post('iem_close_session', { session_id: closeBtn.dataset.sessionId }, function(err, res){
+                if (err || !res.ok || !res.j.success) {
+                    alert('No se pudo cerrar: ' + (res && res.j && res.j.data && res.j.data.message || 'error'));
+                    return;
+                }
+                location.reload();
+            });
+        });
+    }
+
+    // ── Modal merma ─────────────────────────────────────────────────────
+    var modal = document.getElementById('iem-merma-modal');
+    var current = null;
+    document.addEventListener('click', function(e){
+        var btn = e.target.closest('.iem-merma-btn');
+        if (btn) {
+            current = {
+                item_id:       btn.dataset.itemId,
+                sucursal_slug: btn.dataset.sucursal,
+                session_id:    btn.dataset.sessionId
+            };
+            document.getElementById('iem-m-name').textContent = btn.dataset.name;
+            document.getElementById('iem-m-qty').value = 1;
+            document.getElementById('iem-m-decrement').checked = false;
+            document.getElementById('iem-m-err').style.display = 'none';
+            modal.style.display = 'flex';
+            return;
+        }
+        if (e.target.id === 'iem-m-cancel') {
+            modal.style.display = 'none';
+            return;
+        }
+        if (e.target.id === 'iem-m-save' && current) {
+            var err = document.getElementById('iem-m-err');
+            err.style.display = 'none';
+            post('iem_register_merma', {
+                item_id:       current.item_id,
+                sucursal_slug: current.sucursal_slug,
+                session_id:    current.session_id,
+                qty:           document.getElementById('iem-m-qty').value,
+                tipo:          document.getElementById('iem-m-tipo').value,
+                decrement_wc:  document.getElementById('iem-m-decrement').checked ? 1 : 0
+            }, function(e2, res){
+                if (e2 || !res.ok || !res.j.success) {
+                    err.textContent = (res && res.j && res.j.data && res.j.data.message) || 'Error guardando merma.';
+                    err.style.display = 'block';
+                    return;
+                }
+                modal.style.display = 'none';
+                current = null;
+            });
+        }
+    });
+})();
+</script>
