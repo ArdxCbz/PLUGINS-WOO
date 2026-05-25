@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Inventario por Sucursal VENTOVA
 Description: Submenú "Inventario Ventova" bajo Productos. Conteo físico por sucursal con persistencia mensual, registro de mermas/defectuosos y exportación CSV (inventario unificado, por sucursal, conteo físico, histórico de conteos, mermas). Incluye productos de la categoría TIENDA (también los ocultos) bajo Santa Cruz.
-Version: 3.11
+Version: 3.13
 Author: Ardx
 Requires Plugins: woocommerce
 */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 
 define('IEM_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('IEM_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('IEM_VERSION', '3.11');
+define('IEM_VERSION', '3.13');
 
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-schema.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-permisos.php';

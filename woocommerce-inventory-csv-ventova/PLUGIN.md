@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Slug** | `woocommerce-inventory-csv-ventova` |
-| **Versión** | 3.11 |
+| **Versión** | 3.13 |
 | **Autor** | Ardx |
 | **Prefijo constantes** | `IEM_` |
 | **Prefijo clases** | `IEM_*` |
@@ -51,10 +51,10 @@ Cuatro pantallas, dos puntos de entrada en el menú:
 | `includes/class-iem-admin.php` | Submenús + endpoints `admin_post` + renderers. Punto de entrada del UI. |
 | `templates/admin-page.php` | UI principal del admin: filtros, tabla, conteo efímero + banner de estado del conteo persistido del mes. Columna Stock visible. |
 | `templates/admin-historico.php` | Listado filtrable de sesiones de conteo. |
-| `templates/admin-historico-detalle.php` | Pantalla del conteo (captura con autosave si borrador; solo lectura si cerrado) + modal de merma rápida. Marca filas extras con badge `EXTRA` y muestra columna Notas. |
+| `templates/admin-historico-detalle.php` | Pantalla del conteo (captura con autosave si borrador; solo lectura si cerrado) + modal de merma rápida. Marca filas extras con badge `EXTRA`, muestra columna Notas y **columna Imagen** (miniatura priorizando la imagen de la variación sobre la del padre). |
 | `templates/admin-mermas.php` | Form de registro de merma (con validación AJAX del SKU y auto-selección de sucursal) + listado filtrable con costo unitario y subtotal + `<tfoot>` con totales + filtro por rango de fechas + export CSV. |
 | `templates/admin-config.php` | Tabla de asignación: usuario ↔ sucursal a contar. Excluye administrators / shop_managers / customers. |
-| `templates/admin-my-count.php` | UI del contador: tabla principal sin columna Stock (conteo legítimo) + sección "Filas adicionales" con form y botón eliminar. Bloqueada al cerrar. |
+| `templates/admin-my-count.php` | UI del contador: tabla principal sin columna Stock (conteo legítimo), con **columna Imagen** y **filtro por categoría** (chips client-side) + sección "Filas adicionales" con form y botón eliminar. Bloqueada al cerrar. |
 
 ## Meta keys / taxonomías leídas
 
@@ -247,6 +247,18 @@ o roles custom del negocio).
 15. **Mi Conteo sin columna Stock (v3.8+):** la pantalla del contador oculta
     `stock_at_count` para forzar un conteo legítimo (no copiar lo que el sistema
     dice). El estado OK/Revisar se calcula en el servidor.
+    - **v3.12:** se agregó la **columna Imagen** (miniatura 40×40 del producto)
+      y un **filtro por categoría** client-side (chips estilo `Inventario
+      Ventova`) sobre la tabla principal. El filtro opera sobre
+      `data-categories` (pipe-delimitado, lowercased) y aplica tanto en draft
+      como en read-only. Las filas extra muestran un placeholder gris en la
+      columna Imagen (no tienen producto WC asociado).
+    - **v3.13:** la columna Imagen se replicó en `admin-historico-detalle.php`
+      (vista del admin) y la resolución de la miniatura **prioriza la imagen
+      configurada en la variación** (`item_id`) y solo cae al padre si la
+      variación no tiene `_thumbnail_id` propio. Lookup:
+      `get_post_thumbnail_id(item_id) || get_post_thumbnail_id(parent_id)`,
+      con prime de cachés en lote sobre ambos sets de IDs.
 16. **Mermas — solo simples o variaciones:** los productos variables (padres) se
     rechazan con un mensaje explícito porque el stock vive en cada variación. El
     operador debe ingresar el SKU/ID de la variación.

@@ -119,13 +119,71 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
     // Partir las líneas en originales (snapshot) vs extras (ad-hoc del contador).
     $lines_main  = array_filter($lines, function ($L) { return empty($L['is_extra']); });
     $lines_extra = array_filter($lines, function ($L) { return !empty($L['is_extra']); });
+
+    // Prime de cachés de posts (ítem + padre) para resolver imágenes en un
+    // solo lote — evita N+1 al llamar get_post_thumbnail_id por fila.
+    $iem_mc_pids = [];
+    foreach ($lines as $L) {
+        foreach ([(int)($L['item_id'] ?? 0), (int)($L['parent_id'] ?? 0)] as $id) {
+            if ($id > 0) $iem_mc_pids[$id] = true;
+        }
+    }
+    if ($iem_mc_pids && function_exists('_prime_post_caches')) {
+        _prime_post_caches(array_keys($iem_mc_pids), false, true);
+    }
+
+    // Helper para renderizar la miniatura del producto (o placeholder).
+    // Prioridad: imagen de la propia variación (item_id) → imagen del padre.
+    // Las variaciones de WooCommerce pueden tener su propia imagen distinta
+    // a la del padre; debe respetarse cuando esté configurada.
+    $iem_mc_thumb = function ($L) {
+        $tid = 0;
+        $iid = (int) ($L['item_id']   ?? 0);
+        $pid = (int) ($L['parent_id'] ?? 0);
+        if ($iid > 0)                    $tid = (int) get_post_thumbnail_id($iid);
+        if (!$tid && $pid > 0 && $pid !== $iid) $tid = (int) get_post_thumbnail_id($pid);
+        if ($tid) {
+            return wp_get_attachment_image($tid, [40, 40], false, [
+                'class' => 'iem-mc-thumb-img',
+                'alt'   => '',
+            ]);
+        }
+        return '<span class="iem-mc-thumb-ph" aria-hidden="true">—</span>';
+    };
+
+    // Set único de categorías presentes en las filas del snapshot original.
+    // El campo `category` puede contener varias separadas por coma.
+    $iem_mc_cats = [];
+    foreach ($lines_main as $L) {
+        if (empty($L['category'])) continue;
+        foreach (explode(',', (string) $L['category']) as $c) {
+            $c = trim($c);
+            if ($c !== '') $iem_mc_cats[$c] = true;
+        }
+    }
+    $iem_mc_cats = array_keys($iem_mc_cats);
+    sort($iem_mc_cats, SORT_NATURAL | SORT_FLAG_CASE);
     ?>
+
+    <?php if (!empty($iem_mc_cats)): ?>
+        <div class="iem-mc-cat-filters">
+            <span class="iem-mc-cat-label">Categoría:</span>
+            <button type="button" class="button iem-mc-cat-btn iem-mc-cat-active" data-cat="">Todas</button>
+            <?php foreach ($iem_mc_cats as $cat): ?>
+                <button type="button" class="button iem-mc-cat-btn"
+                        data-cat="<?php echo esc_attr(strtolower($cat)); ?>">
+                    <?php echo esc_html($cat); ?>
+                </button>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
 
     <table class="wp-list-table widefat fixed striped" id="iem-mc-table" style="max-width:980px;">
         <thead>
             <tr>
-                <th style="width:16%">SKU</th>
-                <th style="width:38%">Producto</th>
+                <th style="width:7%">Imagen</th>
+                <th style="width:14%">SKU</th>
+                <th style="width:33%">Producto</th>
                 <th style="width:18%">Categoría</th>
                 <th style="width:14%">Tu conteo</th>
                 <th style="width:8%">Estado</th>
@@ -138,8 +196,19 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
             $row_cls = '';
             if ($status === 'OK')      $row_cls = 'iem-row-ok';
             if ($status === 'Revisar') $row_cls = 'iem-row-revisar';
+
+            // data-categories pipe-delimitado para filtrado client-side.
+            $row_cats_lower = [];
+            foreach (explode(',', (string) $L['category']) as $c) {
+                $c = strtolower(trim($c));
+                if ($c !== '') $row_cats_lower[] = $c;
+            }
+            $row_cats_attr = '|' . implode('|', $row_cats_lower) . '|';
         ?>
-            <tr class="<?php echo esc_attr($row_cls); ?>" data-line-id="<?php echo (int) $L['id']; ?>">
+            <tr class="<?php echo esc_attr($row_cls); ?>"
+                data-line-id="<?php echo (int) $L['id']; ?>"
+                data-categories="<?php echo esc_attr($row_cats_attr); ?>">
+                <td class="iem-mc-thumb"><?php echo $iem_mc_thumb($L); ?></td>
                 <td><code><?php echo esc_html($L['sku']); ?></code></td>
                 <td><?php echo esc_html($L['name']); ?></td>
                 <td><?php echo esc_html($L['category']); ?></td>
@@ -168,9 +237,10 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
     <table class="wp-list-table widefat fixed striped" id="iem-mc-extra-table" style="max-width:980px;">
         <thead>
             <tr>
-                <th style="width:14%">SKU</th>
-                <th style="width:28%">Producto</th>
-                <th style="width:24%">Notas</th>
+                <th style="width:7%">Imagen</th>
+                <th style="width:12%">SKU</th>
+                <th style="width:24%">Producto</th>
+                <th style="width:23%">Notas</th>
                 <th style="width:12%">Tu conteo</th>
                 <th style="width:8%">Estado</th>
                 <th style="width:6%">Auto</th>
@@ -180,7 +250,7 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
         <tbody id="iem-mc-extra-tbody">
         <?php if (empty($lines_extra)): ?>
             <tr id="iem-mc-extra-empty">
-                <td colspan="7" style="color:#888;font-style:italic;text-align:center;padding:14px;">
+                <td colspan="8" style="color:#888;font-style:italic;text-align:center;padding:14px;">
                     No hay filas adicionales todavía.
                 </td>
             </tr>
@@ -192,6 +262,7 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
                 if ($status === 'Revisar') $row_cls = 'iem-row-revisar';
         ?>
             <tr class="iem-mc-extra-row <?php echo esc_attr($row_cls); ?>" data-line-id="<?php echo (int) $L['id']; ?>">
+                <td class="iem-mc-thumb"><?php echo $iem_mc_thumb($L); ?></td>
                 <td><code><?php echo esc_html($L['sku'] ?: '—'); ?></code></td>
                 <td><?php echo esc_html($L['name']); ?></td>
                 <td style="font-size:12px;color:#555;"><?php echo esc_html($L['notes'] ?? ''); ?></td>
@@ -274,6 +345,19 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
 .iem-row-ok      { background: #f1faf1 !important; }
 .iem-row-revisar { background: #fdecec !important; }
 .iem-mc-save     { font-size: 11px; }
+
+.iem-mc-thumb { padding:4px !important; vertical-align:middle; text-align:center; }
+.iem-mc-thumb-img { width:40px; height:40px; object-fit:cover; border-radius:4px; border:1px solid #ddd; display:inline-block; background:#fafafa; }
+.iem-mc-thumb-ph {
+    display:inline-block; width:40px; height:40px; line-height:40px;
+    background:#f4f4f4; border:1px dashed #ccc; border-radius:4px;
+    text-align:center; color:#bbb; font-size:11px;
+}
+
+.iem-mc-cat-filters       { margin:14px 0; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.iem-mc-cat-label         { font-weight:600; margin-right:4px; }
+.iem-mc-cat-btn           { padding:2px 12px; }
+.iem-mc-cat-active        { background:#2271b1 !important; color:#fff !important; border-color:#135e96 !important; }
 </style>
 
 <script>
@@ -286,6 +370,31 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
         draft: <?php echo $is_draft ? 'true' : 'false'; ?>,
         page:  <?php echo wp_json_encode($page_url); ?>
     };
+
+    // ── Filtro por categoría (aplica también en read-only) ─────────────────
+    (function () {
+        var mcTable = document.getElementById('iem-mc-table');
+        if (!mcTable) return;
+        var activeCat = '';
+
+        function applyCatFilter() {
+            mcTable.querySelectorAll('tbody tr').forEach(function (tr) {
+                var cats = tr.dataset.categories || '';
+                var match = (activeCat === '' || cats.indexOf('|' + activeCat + '|') >= 0);
+                tr.style.display = match ? '' : 'none';
+            });
+        }
+
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.iem-mc-cat-btn');
+            if (!btn) return;
+            activeCat = btn.dataset.cat || '';
+            document.querySelectorAll('.iem-mc-cat-btn').forEach(function (b) {
+                b.classList.toggle('iem-mc-cat-active', b === btn);
+            });
+            applyCatFilter();
+        });
+    })();
 
     if (!IEM_AJAX.draft) return; // closed → solo visualización
 
@@ -382,6 +491,7 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
         tr.className = 'iem-mc-extra-row ' + rowCls;
         tr.dataset.lineId = L.id;
         tr.innerHTML =
+            '<td class="iem-mc-thumb"><span class="iem-mc-thumb-ph" aria-hidden="true">—</span></td>' +
             '<td><code>' + escapeHtml(L.sku || '—') + '</code></td>' +
             '<td>' + escapeHtml(L.name) + '</td>' +
             '<td style="font-size:12px;color:#555;">' + escapeHtml(L.notes || '') + '</td>' +
@@ -472,7 +582,7 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
                 if (extraTbody && !extraTbody.querySelector('tr')) {
                     var tr = document.createElement('tr');
                     tr.id = 'iem-mc-extra-empty';
-                    tr.innerHTML = '<td colspan="7" style="color:#888;font-style:italic;text-align:center;padding:14px;">No hay filas adicionales todavía.</td>';
+                    tr.innerHTML = '<td colspan="8" style="color:#888;font-style:italic;text-align:center;padding:14px;">No hay filas adicionales todavía.</td>';
                     extraTbody.appendChild(tr);
                 }
             } else {

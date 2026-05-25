@@ -78,14 +78,43 @@ $reopen_url = add_query_arg([
     <input type="search" id="iem-search" placeholder="Buscar SKU o producto…"
            style="min-width:280px;margin:8px 0;">
 
+    <?php
+    // Prime de cachés de posts (ítem + padre) y helper de miniatura.
+    // Prioridad: imagen de la variación (item_id) → imagen del padre.
+    $iem_h_pids = [];
+    foreach ($lines as $L) {
+        foreach ([(int)($L['item_id'] ?? 0), (int)($L['parent_id'] ?? 0)] as $id) {
+            if ($id > 0) $iem_h_pids[$id] = true;
+        }
+    }
+    if ($iem_h_pids && function_exists('_prime_post_caches')) {
+        _prime_post_caches(array_keys($iem_h_pids), false, true);
+    }
+    $iem_h_thumb = function ($L) {
+        $tid = 0;
+        $iid = (int) ($L['item_id']   ?? 0);
+        $pid = (int) ($L['parent_id'] ?? 0);
+        if ($iid > 0)                           $tid = (int) get_post_thumbnail_id($iid);
+        if (!$tid && $pid > 0 && $pid !== $iid) $tid = (int) get_post_thumbnail_id($pid);
+        if ($tid) {
+            return wp_get_attachment_image($tid, [40, 40], false, [
+                'class' => 'iem-h-thumb-img',
+                'alt'   => '',
+            ]);
+        }
+        return '<span class="iem-h-thumb-ph" aria-hidden="true">—</span>';
+    };
+    ?>
+
     <table class="wp-list-table widefat fixed striped iem-table">
         <thead>
             <tr>
-                <th style="width:13%">SKU</th>
-                <th style="width:24%">Producto</th>
+                <th style="width:6%">Imagen</th>
+                <th style="width:12%">SKU</th>
+                <th style="width:22%">Producto</th>
                 <th style="width:9%">Stock al inicio</th>
-                <th style="width:14%">Categoría</th>
-                <th style="width:13%">Notas</th>
+                <th style="width:13%">Categoría</th>
+                <th style="width:11%">Notas</th>
                 <th style="width:11%">Conteo</th>
                 <th style="width:8%">Estado</th>
                 <th style="width:8%">Merma</th>
@@ -101,6 +130,7 @@ $reopen_url = add_query_arg([
             <tr class="<?php echo esc_attr(trim($row_cls)); ?>"
                 data-sku="<?php echo esc_attr(strtolower((string) $l['sku'])); ?>"
                 data-name="<?php echo esc_attr(strtolower((string) $l['name'])); ?>">
+                <td class="iem-h-thumb"><?php echo $iem_h_thumb($l); ?></td>
                 <td>
                     <code><?php echo esc_html($l['sku'] ?: '—'); ?></code>
                     <?php if ($is_extra): ?>
@@ -196,6 +226,11 @@ $reopen_url = add_query_arg([
 .iem-badge-extra { display:inline-block; background:#ffe7a0; color:#5a3d00;
                    padding:1px 6px; border-radius:8px; font-size:10px;
                    font-weight:700; letter-spacing:0.5px; }
+.iem-h-thumb     { padding:4px !important; vertical-align:middle; text-align:center; }
+.iem-h-thumb-img { width:40px; height:40px; object-fit:cover; border-radius:4px; border:1px solid #ddd; display:inline-block; background:#fafafa; }
+.iem-h-thumb-ph  { display:inline-block; width:40px; height:40px; line-height:40px;
+                   background:#f4f4f4; border:1px dashed #ccc; border-radius:4px;
+                   text-align:center; color:#bbb; font-size:11px; }
 </style>
 
 <script>
