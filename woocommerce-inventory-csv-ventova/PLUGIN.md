@@ -32,7 +32,8 @@ Cuatro pantallas, dos puntos de entrada en el menú:
 
 **Top-level** (visible para contadores asignados y administradores):
 5. **Mi Conteo** — UI simplificada para que el contador asignado capture el conteo del
-   mes de su sucursal, con autosave y opción de agregar "filas adicionales" para
+   mes de su sucursal, con autosave, miniatura del producto por fila, **filtro por
+   categoría** (chips client-side) y opción de agregar "filas adicionales" para
    productos físicos que no estaban en el listado.
 
 ## Archivos clave
@@ -305,6 +306,10 @@ o roles custom del negocio).
 - **Memoización en `IEM_Collector`:** categorías del padre y costo del padre
   (`get_post_meta` directo) cacheados por request.
 - **Mapa inverso de sucursales:** O(1) en `find_slug_by_name`.
+- **Miniaturas en Mi Conteo / Histórico-detalle (v3.12+):** se primean en un solo
+  lote `_prime_post_caches($all_pids, false, true)` con la unión de `item_id` y
+  `parent_id` de todas las líneas, justo antes de renderizar la tabla. Evita el
+  N+1 que generaría `get_post_thumbnail_id()` por fila.
 
 ## Flujos UX
 
@@ -317,9 +322,13 @@ o roles custom del negocio).
    botón "Reabrir conteo".
 
 ### Admin: detalle del conteo
-- Pantalla de detalle (`admin-historico-detalle.php`): tabla con `stock_at_count`,
-  columna Notas y un input por línea. Tipeo → debounce 400 ms → AJAX `iem_save_line`
-  (con `line_id`) → marca ✓ guardado / ✗ error y pinta la fila OK/Revisar.
+- Pantalla de detalle (`admin-historico-detalle.php`): tabla con miniatura del
+  producto, `stock_at_count`, columna Notas y un input por línea. Tipeo → debounce
+  400 ms → AJAX `iem_save_line` (con `line_id`) → marca ✓ guardado / ✗ error y
+  pinta la fila OK/Revisar.
+- **Columna Imagen (v3.13+):** miniatura 40×40 priorizando la imagen de la
+  variación (`item_id`) y cayendo al padre si no tiene `_thumbnail_id` propio.
+  Filas extra (`item_id=0`) muestran placeholder gris.
 - Filas con badge `EXTRA` (borde amarillo izquierdo) son las ad-hoc del contador.
 - Botón **"Cerrar conteo"** confirma y dispara `iem_close_session`.
 
@@ -332,9 +341,11 @@ o roles custom del negocio).
 - Top-level menu **Mi Conteo** (visible solo si `can_access_my_count`).
 - Si admin sin sucursal elegida → selector para "ponerse en los zapatos de" una sucursal.
 - Si no hay sesión → botón "Iniciar conteo".
-- Si draft → tabla principal (sin columna Stock) con autosave + sección "Filas
-  adicionales" con form (Nombre*, SKU, Cantidad*, Notas) + botón cerrar.
-- Si closed → todo read-only.
+- Si draft → tabla principal (sin columna Stock) con miniatura del producto,
+  autosave y **filtro por categoría** (chips client-side encima de la tabla,
+  derivados del campo `category` de las líneas) + sección "Filas adicionales"
+  con form (Nombre*, SKU, Cantidad*, Notas) + botón cerrar.
+- Si closed → todo read-only (el filtro de categoría sigue funcionando).
 
 ### Registrar merma
 - Desde el botón **"Merma"** en cada fila de la pantalla de detalle de conteo →
