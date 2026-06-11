@@ -1,7 +1,7 @@
 # Woo Traspasos de Producto Ventova
 
 - **Slug:** `woocommerce-traspasos-ventova` (archivo principal `woo-traspasos-producto.php`)
-- **Versión:** 4.6 (schema `wc_tp_version = '1.5.0'`)
+- **Versión:** 4.7 (schema `wc_tp_version = '1.5.0'`)
 - **Autor:** Ardx
 - **Requiere:** WooCommerce (no declara compat HPOS; no toca pedidos, opera sobre stock de variaciones + tabla propia)
 - **Prefijos:** clases `WC_TP_*` · tabla `wp_wc_tp_history` · option `wc_tp_version` · nonce `wc_tp_nonce` · AJAX `wc_tp_*` · página `wc-traspasos`
@@ -108,6 +108,7 @@ usa `origen`** (el pago de envío sale de la sucursal de origen).
 - **WooCommerce** activo (se autoaborta si no). Usa variaciones (`product_variation`), atributo `pa_sucursal` y categorías `product_cat`.
 - **Consumidor**: [[plugin-hpos-ardxoz-woo-demv]] usa `WC_TP_API` (vía `class_exists('WC_TP_API')`) para su caja de Traspasos: lista, setea costo/método y marca pago de envío. Este plugin **no depende** de DEMV.
 - El stock se mueve entre **variaciones equivalentes**: mismo producto padre, mismos atributos excepto `pa_sucursal`, que cambia al slug de destino (`_find_variation_in_branch`).
+- **Integración opcional (v4.7+)**: si `woocommerce-inventory-csv-ventova` (`IEM_Kardex`) está activo, los movimientos de stock se registran en su Kardex como `transfer_out`/`transfer_in`. Es una dependencia **suave** (`class_exists`): sin IEM el plugin funciona igual moviendo stock directo. IEM **no** depende de este plugin.
 
 ## Reglas de negocio no obvias
 
@@ -121,10 +122,12 @@ usa `origen`** (el pago de envío sale de la sucursal de origen).
 8. **`estado` interno ≠ estados WC** — Los valores `'En Curso'`/`'Recibido'` son strings de esta tabla, sin relación con los `post_status` de [[plugin-hpos-ardxoz-woo-status]]. No confundir.
 9. **Métodos de envío validados centralmente** — `set_metodo_envio` solo acepta `IBEX`/`ENCOMIENDA` (`WC_TP_Config::is_metodo_envio_valido`); vacío borra el valor. Cambiar la lista exige editar la constante.
 10. **Filtrar por origen, no destino** — Para reportes de pago de envío (DEMV), filtrar por `origen`: el costo del courier lo paga la sucursal que envía.
+11. **Movimiento de stock vía Kardex de Inventario (v4.7+)** — Todo movimiento de stock pasa por `WC_TP_Ajax::_move_stock()`. Si el plugin de Inventario está activo (`class_exists('IEM_Kardex')`), delega en `IEM_Kardex::record(update_wc=true)`, que cambia el stock de WC con guard interno (no genera `manual_wc`) **e** inserta una fila en el Kardex: `transfer_out` (O) en la variación de origen, `transfer_in` (I) en la de destino, con `ref_table='wc_tp_history'`, `ref_id`=id del traspaso, `ref_code='TRASP-#id'` y nota legible ("Traspaso → destino" / "Traspaso desde origen"; reversos al editar/revertir recepción). Si IEM **no** está activo, cae al movimiento directo `set_stock_quantity()/save()` (sin kardex) — el plugin sigue siendo funcional standalone. `transfer_stock()` ahora inserta la fila de historial **antes** de mover stock para tener el `id` como referencia; el `_apply_movement` corre dentro de la misma transacción (rollback total si falla). Los slugs `sucursal-cbba-stock`/`sucursal-scz-stock` coinciden con los que usa IEM (`IEM_Sucursales`/`pa_sucursal`), así que cada lado cae bajo su filtro de sucursal en el Kardex sin traducción.
+    > **Nota:** por IEM, las variaciones destino deben **gestionar stock** (`managing_stock()`); si no, `record` aborta y se revierte la transacción (antes el `set_stock_quantity` silencioso no avisaba). Los traspasos de **bienes** (solo descripción) no tocan stock ni Kardex.
 
 ## Issues conocidos / deuda técnica
 
-- **Versión doble**: el header del plugin dice `4.6` pero el schema usa `wc_tp_version = '1.5.0'` (constante hardcodeada en `update_db_check`). Bumpear esa constante es lo que dispara la migración, no la versión del header.
+- **Versión doble**: el header del plugin (`4.7`) y el schema (`wc_tp_version = '1.5.0'`, constante hardcodeada en `update_db_check`) corren por separado. Bumpear esa constante es lo que dispara la migración (`dbDelta` + `ensure_columns_exist`); subir solo la versión del header **no** migra la tabla.
 - **`ensure_columns_exist` con `SHOW COLUMNS`/`ALTER` manuales** — Redundante con `dbDelta`; histórico de columnas añadidas incrementalmente. Cada columna nueva exige otro bloque manual.
 - **`error_log` en producción** — `install`/`update_db_check`/`ensure_columns_exist` escriben al log en cada migración. Ruido si se reactiva.
 - **Stock sin lock de concurrencia** — El movimiento lee `get_stock_quantity()` y escribe sin bloqueo a nivel fila; dos traspasos simultáneos del mismo SKU podrían pisarse (las transacciones cubren atomicidad del historial, no el race de stock de WC).

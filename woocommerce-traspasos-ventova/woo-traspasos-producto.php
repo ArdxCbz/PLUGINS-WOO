@@ -2,7 +2,7 @@
 /*
 Plugin Name: Woo Traspasos de Producto Ventova
 Description: Mueve stock entre sucursales usando variaciones; soporta también traspasos solo con descripción (envío de bienes por mensajería).
-Version: 4.6
+Version: 4.7
 Author: Ardx
 */
 

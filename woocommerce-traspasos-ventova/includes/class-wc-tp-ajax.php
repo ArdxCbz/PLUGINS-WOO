@@ -157,14 +157,16 @@ class WC_TP_Ajax
             if ($has_items) {
                 self::_validate_stock($items, $origen);
                 self::_validate_dest_variations($items, $destino);
-                self::_apply_movement($items, $origen, $destino, $estado);
             }
 
             $completed = ($estado === 'Recibido') ? 1 : 0;
 
-            // Guardar Historial
+            // Guardar Historial PRIMERO: el id de la fila es la referencia que
+            // se persiste en el Kardex (ref_id), por eso se inserta antes de
+            // mover stock. Si el movimiento falla, el ROLLBACK deshace también
+            // este INSERT (todo en la misma transacción).
             $table = $wpdb->prefix . 'wc_tp_history';
-            $wpdb->insert(
+            $inserted = $wpdb->insert(
                 $table,
                 [
                     'date_created' => current_time('mysql'),
@@ -179,6 +181,14 @@ class WC_TP_Ajax
                 ],
                 ['%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%d']
             );
+            if ($inserted === false) {
+                throw new Exception('No se pudo guardar el traspaso.');
+            }
+            $transfer_id = (int) $wpdb->insert_id;
+
+            if ($has_items) {
+                self::_apply_movement($items, $origen, $destino, $estado, $transfer_id);
+            }
 
             $wpdb->query('COMMIT');
             wp_send_json_success();
@@ -254,13 +264,13 @@ class WC_TP_Ajax
             self::_validate_dest_variations($new_items, $destino);
 
             // 1. REVERTIR el movimiento anterior
-            self::_revert_movement($old_items, $origen, $destino, $estado);
+            self::_revert_movement($old_items, $origen, $destino, $estado, $id);
 
             // 2. Validar nuevo stock una vez que el origen recuperó el stock anterior
             self::_validate_stock($new_items, $origen);
 
             // 3. APLICAR nuevo movimiento
-            self::_apply_movement($new_items, $origen, $destino, $estado);
+            self::_apply_movement($new_items, $origen, $destino, $estado, $id);
 
             // 4. Actualizar DB
             $wpdb->update(
@@ -309,13 +319,13 @@ class WC_TP_Ajax
             if ($new_estado === 'Recibido' && $current_estado === 'En Curso') {
                 // Completar: Sumar a destino
                 foreach ($items as $it) {
-                    self::_add_stock_to_dest($it['id'], $it['qty'], $destino);
+                    self::_add_stock_to_dest($it['id'], $it['qty'], $destino, $id, $origen);
                 }
                 $completed = 1;
             } elseif ($new_estado === 'En Curso' && $current_estado === 'Recibido') {
                 // Revertir recepción: Restar de destino
                 foreach ($items as $it) {
-                    self::_remove_stock_from_dest($it['id'], $it['qty'], $destino);
+                    self::_remove_stock_from_dest($it['id'], $it['qty'], $destino, $id, 'Reverso de recepción de traspaso');
                 }
                 $completed = 0;
             } else {
@@ -332,6 +342,64 @@ class WC_TP_Ajax
     }
 
     // --- HELPERS ---
+
+    /**
+     * Mueve el stock de UNA variación registrándolo en el Kardex de IEM
+     * (`IEM_Kardex::record`) con referencia de traspaso, de modo que el
+     * movimiento aparezca en el Kardex como "Traspaso" y no como `manual_wc`
+     * anónimo. `record(update_wc=true)` cambia el stock de WC con guard interno
+     * (no dispara el catch-all del kardex) e inserta la fila del ledger; todo
+     * dentro de la transacción SQL abierta por el caller.
+     *
+     * Si el plugin de Inventario (IEM) NO está activo, cae al movimiento directo
+     * de stock (`set_stock_quantity`/`save`) — el plugin de Traspasos sigue
+     * funcionando standalone, solo que sin kardex.
+     *
+     * @param int    $item_id     Variación cuyo stock cambia.
+     * @param int    $qty         Cantidad (> 0).
+     * @param string $direction   'I' (suma) | 'O' (resta).
+     * @param string $tipo        IEM_Kardex::TYPE_TRANSFER_IN | TYPE_TRANSFER_OUT.
+     * @param int    $transfer_id id de wp_wc_tp_history (referencia del kardex).
+     * @param string $note        Nota legible (p. ej. "Traspaso → SANTA CRUZ").
+     * @throws Exception si el movimiento falla (para abortar la transacción).
+     */
+    private static function _move_stock($item_id, $qty, $direction, $tipo, $transfer_id, $note)
+    {
+        $item_id = intval($item_id);
+        $qty     = intval($qty);
+        if ($item_id <= 0 || $qty <= 0) {
+            return;
+        }
+
+        // Camino preferido: registrar en el Kardex de Inventario Ventova.
+        if (class_exists('IEM_Kardex')) {
+            $r = IEM_Kardex::record([
+                'item_id'   => $item_id,
+                'type'      => $tipo,
+                'direction' => $direction,
+                'qty'       => $qty,
+                'ref_table' => 'wc_tp_history',
+                'ref_id'    => intval($transfer_id),
+                'ref_code'  => 'TRASP-' . intval($transfer_id),
+                'notes'     => $note,
+                'update_wc' => true, // mueve el stock de WC con guard (sin manual_wc).
+            ]);
+            if (is_wp_error($r)) {
+                throw new Exception($r->get_error_message());
+            }
+            return;
+        }
+
+        // Fallback sin IEM: movimiento directo del stock de WC.
+        $product = wc_get_product($item_id);
+        if (!$product) {
+            return;
+        }
+        $cur = (int) $product->get_stock_quantity();
+        $new = ($direction === 'I') ? $cur + $qty : max(0, $cur - $qty);
+        $product->set_stock_quantity($new);
+        $product->save();
+    }
 
     private static function _validate_dest_variations($items, $destino_slug)
     {
@@ -365,49 +433,49 @@ class WC_TP_Ajax
         }
     }
 
-    private static function _apply_movement($items, $origen, $destino, $estado)
+    private static function _apply_movement($items, $origen, $destino, $estado, $transfer_id = 0)
     {
+        $dest_name = WC_TP_Config::get_sucursal_name($destino);
+
         // 1. Restar de origen (Siempre se hace al crear/aplicar)
+        // NOTA: el tipo va como string literal (no IEM_Kardex::TYPE_*) para no
+        // referenciar una constante de clase ausente cuando IEM no está activo.
         foreach ($items as $it) {
-            $product = wc_get_product(intval($it['id']));
-            if ($product) {
-                $new_stock = max(0, $product->get_stock_quantity() - intval($it['qty']));
-                $product->set_stock_quantity($new_stock);
-                $product->save();
-            }
+            self::_move_stock(
+                $it['id'], $it['qty'], 'O',
+                'transfer_out', $transfer_id, 'Traspaso → ' . $dest_name
+            );
         }
 
         // 2. Si ya es recibido, sumar a destino
         if ($estado === 'Recibido') {
             foreach ($items as $it) {
-                self::_add_stock_to_dest($it['id'], $it['qty'], $destino);
+                self::_add_stock_to_dest($it['id'], $it['qty'], $destino, $transfer_id, $origen);
             }
         }
     }
 
-    private static function _revert_movement($items, $origen, $destino, $estado)
+    private static function _revert_movement($items, $origen, $destino, $estado, $transfer_id = 0)
     {
         // Operación inversa a _apply_movement
 
         // 1. Sumar a origen (Devolver lo que se quitó)
         foreach ($items as $it) {
-            $product = wc_get_product(intval($it['id']));
-            if ($product) {
-                $new_stock = $product->get_stock_quantity() + intval($it['qty']);
-                $product->set_stock_quantity($new_stock);
-                $product->save();
-            }
+            self::_move_stock(
+                $it['id'], $it['qty'], 'I',
+                'transfer_in', $transfer_id, 'Reverso de traspaso (devolución a origen)'
+            );
         }
 
         // 2. Si estaba recibido, restar de destino (Quitar lo que se entregó)
         if ($estado === 'Recibido') {
             foreach ($items as $it) {
-                self::_remove_stock_from_dest($it['id'], $it['qty'], $destino);
+                self::_remove_stock_from_dest($it['id'], $it['qty'], $destino, $transfer_id, 'Reverso de traspaso');
             }
         }
     }
 
-    private static function _add_stock_to_dest($source_var_id, $qty, $dest_slug)
+    private static function _add_stock_to_dest($source_var_id, $qty, $dest_slug, $transfer_id = 0, $origen_slug = '')
     {
         $src = wc_get_product($source_var_id);
         if (!$src)
@@ -422,11 +490,14 @@ class WC_TP_Ajax
             throw new Exception("Variación destino no encontrada para: " . $src->get_name() . ". Créala primero en WooCommerce antes de traspasar.");
         }
 
-        $target_var->set_stock_quantity($target_var->get_stock_quantity() + $qty);
-        $target_var->save();
+        $origen_name = $origen_slug !== '' ? WC_TP_Config::get_sucursal_name($origen_slug) : 'origen';
+        self::_move_stock(
+            $target_var->get_id(), $qty, 'I',
+            'transfer_in', $transfer_id, 'Traspaso desde ' . $origen_name
+        );
     }
 
-    private static function _remove_stock_from_dest($source_var_id, $qty, $dest_slug)
+    private static function _remove_stock_from_dest($source_var_id, $qty, $dest_slug, $transfer_id = 0, $note = 'Reverso de traspaso')
     {
         $src = wc_get_product($source_var_id);
         if (!$src)
@@ -434,9 +505,10 @@ class WC_TP_Ajax
 
         $target_var = self::_find_variation_in_branch($src->get_parent_id(), $src, $dest_slug);
         if ($target_var) {
-            $new = max(0, $target_var->get_stock_quantity() - $qty);
-            $target_var->set_stock_quantity($new);
-            $target_var->save();
+            self::_move_stock(
+                $target_var->get_id(), $qty, 'O',
+                'transfer_out', $transfer_id, $note
+            );
         }
     }
 
