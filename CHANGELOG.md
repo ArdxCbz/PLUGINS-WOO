@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v2.2.0
+- **feat(finanzas-ventova):** Nuevo plugin **Finanzas Ventova** (v2.10) — tesorería y contabilidad básica: cuentas en Bs/USD, movimientos (ingreso/egreso/transferencia) con saldo corrido y validación, categorías/grupos contables, y reportes (flujo de caja, gastos por categoría, Estado de Resultados con CMV desde el Kardex de Inventario y retención IBEX 7%). Integraciones suaves (`class_exists`) con Inventario y DEMV.
+- **feat(inventory-csv-ventova):** Módulo de **Compras** completo (v3.49): borrador → recepción por variación (con reparto por color/sucursal), proveedores (CRUD), costos al recibir y **Kardex** central con saldo corrido.
+- **feat(inventory-csv-ventova):** **Gastos de importación** por compra integrados con Finanzas: flujo registrar → facturar, caja y **moneda dual** (Bs/$ + TC por gasto), y **TC promedio ponderado** (Σ Bs ÷ Σ $) de los gastos facturados.
+- **feat(inventory-csv-ventova):** **Costo de origen (Exw USD)** por línea con subtotal editable (unitario = subtotal ÷ cantidad); logística de importación (Nº tracking, ETA, bultos, peso bruto, CBM, vía) y listado de compras con estados Borrador/Tránsito/Completada.
+- **feat(inventory-csv-ventova):** Recibir **sin afectar inventario** (compras previas al plugin) y registrar gastos después de recibir.
+- **feat(traspasos-ventova):** Integración con el **Kardex de Inventario** (v4.7) — los traspasos registran `transfer_out`/`transfer_in` en el Kardex cuando el plugin de Inventario está activo (dependencia suave); standalone sigue moviendo stock directo.
+- **docs(complementos):** PLUGIN.md de finanzas, inventory y traspasos sincronizados con el código.
+
 ## v2.1.0
 - **feat(demv):** Se implementaron filtros multi-selección (checkboxes) para departamento y método de envío.
 - **feat(demv):** Se agregó panel de estadísticas (Total Depositado, Total, Costo de Envío, 7% IBEX).
