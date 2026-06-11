@@ -1,0 +1,371 @@
+/*
+ * Finanzas Ventova — utilidades de admin.
+ *
+ * Renombrado 1:1 desde las utilidades .iem-* del plugin de Inventario para
+ * mantener un look consistente entre ambos: cards, filter-bar, status spans,
+ * chips, meta strip y alineaciones numéricas.
+ *
+ * Los colores y la fuente monoespaciada se centralizan en tokens (:root) para
+ * poder ajustar el tema en un solo lugar.
+ */
+
+:root {
+    --fin-ok: #107010;
+    --fin-err: #a00;
+    --fin-err-dark: #7a0000;
+    --fin-warn: #d68f00;
+    --fin-muted: #888;
+    --fin-accent: #2271b1;
+    --fin-accent-dark: #135e96;
+    --fin-border: #c3c4c7;
+    --fin-border-soft: #dcdcde;
+    --fin-ink: #1d2327;
+    --fin-mono: Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* ── Cabecera de pestañas de la página única ──────────────────────── */
+.fin-tabs-head {
+    margin-bottom: 0;
+}
+.fin-tabs-head .fin-tabs {
+    margin-bottom: 0;
+}
+.fin-tabs-head + .wrap {
+    margin-top: 0;
+}
+.fin-tabs-head + .wrap > h1.wp-heading-inline {
+    font-size: 1.3em;
+    margin-top: 12px;
+}
+
+/* ── Cards / panels ───────────────────────────────────────────────── */
+.fin-card {
+    background: #fff;
+    border: 1px solid var(--fin-border);
+    border-radius: 4px;
+    padding: 16px 20px;
+}
+.fin-card > h2:first-child,
+.fin-card > h3:first-child { margin-top: 0; }
+
+/* ── Filter bar ───────────────────────────────────────────────────── */
+.fin-filter-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 14px 0 12px;
+}
+.fin-filter-bar label { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── Helper text ──────────────────────────────────────────────────── */
+.fin-help {
+    color: #666;
+    font-style: italic;
+    font-size: 12px;
+}
+.fin-help-block { display: block; margin-top: 6px; }
+
+/* ── Monospace inline (Nº de cuenta, refs) ────────────────────────── */
+.fin-mono { font-family: var(--fin-mono); }
+
+/* ── Status spans ─────────────────────────────────────────────────── */
+.fin-status        { font-weight: 600; }
+.fin-status-ok     { color: var(--fin-ok);   font-weight: 600; }
+.fin-status-err    { color: var(--fin-err);  font-weight: 600; }
+.fin-status-warn   { color: var(--fin-warn); font-weight: 600; }
+.fin-status-muted  { color: var(--fin-muted); }
+
+/* ── Meta strip (total tesorería, etc.) ───────────────────────────── */
+.fin-meta {
+    display: flex; gap: 24px; flex-wrap: wrap;
+    margin: 14px 0;
+    padding: 10px 14px;
+    background: #f6f7f7;
+    border: 1px solid var(--fin-border-soft);
+    border-radius: 4px;
+}
+.fin-meta span { font-size: 13px; }
+
+/* ── Chips (selector de reporte) ──────────────────────────────────── */
+.fin-chips {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    margin: 14px 0 12px;
+}
+.fin-chips__label { font-weight: 600; color: #444; margin-right: 4px; }
+.fin-chip {
+    font-size: 12px !important;
+    padding: 0 12px !important;
+    height: 28px !important;
+    line-height: 26px !important;
+}
+.fin-chip.is-active {
+    background: var(--fin-accent) !important;
+    color: #fff !important;
+    border-color: var(--fin-accent) !important;
+}
+
+/* ── Tablas responsive: scroll horizontal en pantallas angostas ───── */
+.fin-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ── Registro de Movimientos: badges de saldo por cuenta ──────────── */
+.fin-cash-badges {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 14px 0 4px;
+}
+.fin-cash-badge {
+    flex: 0 1 auto;
+    min-width: 160px;
+    background: #fff;
+    border: 1px solid var(--fin-border);
+    border-left: 4px solid var(--fin-accent);
+    border-radius: 4px;
+    padding: 8px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.fin-cash-badge__name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--fin-ink);
+}
+.fin-cash-badge__type {
+    font-size: 11px;
+    color: var(--fin-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.fin-cash-badge__bal {
+    font-family: var(--fin-mono);
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--fin-ok);
+    margin-top: 2px;
+}
+.fin-cash-badge.is-neg {
+    border-left-color: var(--fin-err);
+}
+.fin-cash-badge.is-neg .fin-cash-badge__bal {
+    color: var(--fin-err);
+}
+.fin-cash-badge.is-total {
+    background: var(--fin-accent);
+    border-color: var(--fin-accent);
+    border-left-color: var(--fin-accent-dark);
+}
+.fin-cash-badge.is-total .fin-cash-badge__name,
+.fin-cash-badge.is-total .fin-cash-badge__type,
+.fin-cash-badge.is-total .fin-cash-badge__bal {
+    color: #fff;
+}
+.fin-cash-badge.is-total.is-neg {
+    background: var(--fin-err);
+    border-color: var(--fin-err);
+    border-left-color: var(--fin-err-dark);
+}
+
+/* ── Configuración: filas de encabezado de grupo en el listado de motivos ── */
+.fin-group-row > th {
+    background: #f0f0f1;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fin-ink);
+    border-top: 2px solid var(--fin-border);
+    padding-top: 8px;
+    padding-bottom: 8px;
+}
+.fin-group-row__count {
+    float: right;
+    font-weight: 400;
+    color: var(--fin-muted);
+    font-size: 12px;
+}
+
+/* ── Configuración: motivos permitidos por cuenta (una tarjeta por cuenta) ── */
+.fin-accmot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+.fin-accmot-acc > h3:first-child {
+    margin-top: 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--fin-border-soft);
+}
+.fin-accmot-acc:target {
+    outline: 2px solid var(--fin-accent);
+    outline-offset: 2px;
+}
+.fin-accmot-cols {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+}
+.fin-accmot-cols > div { flex: 1 1 240px; min-width: 0; }
+.fin-accmot-cols h4 {
+    padding-bottom: 4px;
+    border-bottom: 1px solid #eee;
+}
+.fin-accmot-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+}
+.fin-accmot-item.is-taken {
+    color: var(--fin-muted);
+}
+.fin-accmot-item.is-taken .fin-help {
+    font-style: italic;
+}
+
+/* ── Configuración: checkboxes de métodos de envío permitidos ─────── */
+.fin-ship-methods {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+}
+.fin-ship-method {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ── Panel diario de egresos de costo de envío ────────────────────── */
+.fin-ship-panel { margin-top: 20px; }
+.fin-ship-panel > h2 {
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--fin-border-soft);
+}
+.fin-ship-day {
+    margin: 14px 0;
+    border: 1px solid var(--fin-border-soft);
+    border-radius: 4px;
+    padding: 10px 12px;
+    background: #fbfbfc;
+}
+.fin-ship-day__head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+.fin-ship-day__head > strong { font-size: 14px; }
+.fin-ship-table { background: #fff; }
+.fin-ship-day__actions {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0 2px;
+}
+
+/* ── Registro de Movimientos: forms arriba, listado a lo ancho ────── */
+.fin-mov-forms {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+    flex-wrap: wrap;
+    margin-top: 14px;
+}
+.fin-mov-form {
+    flex: 1 1 360px;
+    min-width: 0;
+}
+.fin-mov-list {
+    margin-top: 20px;
+}
+.fin-mov-list > h2 {
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--fin-border-soft);
+}
+
+/* ── Configuración: secciones normalizadas ────────────────────────── */
+.fin-config-section { margin-top: 22px; }
+.fin-config-section > h2 {
+    margin: 0 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--fin-border-soft);
+}
+/* Las 3 automatizaciones: grid de columnas iguales, alineadas y a la misma altura */
+.fin-config-autos {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    align-items: stretch;
+}
+.fin-config-autos .fin-card {
+    display: flex;
+    flex-direction: column;
+}
+.fin-config-autos .fin-card form {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+}
+.fin-config-autos .fin-card .fin-card-actions {
+    margin-top: auto;
+    margin-bottom: 0;
+    padding-top: 14px;
+}
+/* Motivos: formulario fijo + listado flexible, estable (no se mezcla con lo de arriba) */
+.fin-config-motivos {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+.fin-config-motivos__form { flex: 0 0 320px; }
+.fin-config-motivos__list { flex: 1 1 460px; min-width: 0; }
+
+/* ── Control de saldos del historial (resumen filtro + corte) ─────── */
+.fin-mov-control {
+    border: 1px solid var(--fin-border-soft);
+    border-radius: 4px;
+    background: #f6f7f7;
+    padding: 10px 14px;
+    margin: 0 0 12px;
+}
+.fin-mov-summary {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+.fin-cutoff {
+    display: flex;
+    gap: 6px 16px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--fin-border-soft);
+    font-size: 12px;
+}
+.fin-cutoff__label { font-weight: 600; color: #444; }
+.fin-cutoff__item { white-space: nowrap; }
+.fin-cutoff__item b { font-family: var(--fin-mono); }
+.fin-cutoff__item--total {
+    font-weight: 600;
+    padding-left: 10px;
+    border-left: 2px solid var(--fin-accent);
+}
+
+/* ── Encabezados ordenables del historial ─────────────────────────── */
+.fin-sort { text-decoration: none; white-space: nowrap; }
+.fin-sort:hover { text-decoration: underline; }
+.fin-sort-ind { font-size: 11px; color: var(--fin-accent); }
+.fin-sort-ind--idle { color: var(--fin-border); }
+
+/* ── Alineaciones numéricas (saldos, montos) ──────────────────────── */
+.fin-num   { text-align: right; font-family: var(--fin-mono); }
+.fin-num-b { text-align: right; font-family: var(--fin-mono); font-weight: 600; }

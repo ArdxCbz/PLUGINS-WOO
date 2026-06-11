@@ -1,0 +1,89 @@
+/* Vista de impresión del Estado de Resultados — tamaño carta (8.5" x 11"). */
+@page {
+    size: letter;
+    margin: 18mm 16mm;
+}
+
+body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1d2327;
+    margin: 0;
+    background: #f0f0f1;
+}
+
+.fin-doc {
+    max-width: 190mm;
+    margin: 16px auto;
+    background: #fff;
+    padding: 26px 30px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .12);
+    box-sizing: border-box;
+}
+
+.fin-doc__head {
+    text-align: center;
+    border-bottom: 2px solid #1d2327;
+    padding-bottom: 14px;
+    margin-bottom: 20px;
+}
+
+.fin-doc__logo {
+    max-height: 64px;
+    width: auto;
+    margin-bottom: 8px;
+}
+
+.fin-doc__brand {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: .01em;
+}
+
+.fin-doc__title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 6px 0 0;
+    letter-spacing: .02em;
+}
+
+/* El partial centra su propio bloque (.fin-pl, max-width 560px). */
+.fin-pl {
+    margin: 0 auto;
+}
+
+.fin-doc__actions {
+    text-align: center;
+    margin-top: 26px;
+}
+
+.fin-doc__actions button {
+    font: inherit;
+    font-size: 14px;
+    padding: 8px 20px;
+    margin: 0 6px;
+    border: 1px solid #2271b1;
+    background: #2271b1;
+    color: #fff;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.fin-doc__actions button:last-child {
+    background: #fff;
+    color: #2271b1;
+}
+
+@media print {
+    body {
+        background: #fff;
+    }
+    .fin-doc {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+    .fin-doc__actions {
+        display: none;
+    }
+}
