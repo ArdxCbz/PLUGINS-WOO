@@ -1,0 +1,146 @@
+/*
+ * Ventova Inventario — utilidades compartidas (v3.25+)
+ *
+ * Paleta y patrones extraídos de los inline styles que se repetían a través
+ * de los 12 templates. Cada utilidad cubre un patrón usado ≥5 veces; lo
+ * específico de una sola pantalla queda inline.
+ */
+
+/* ── Cabecera de pestañas de la página única (3.28+) ──────────────── */
+/* El dispatcher pinta título + nav-tab-wrapper en su propio .wrap; cada
+ * sección emite su .wrap debajo. Tensamos los márgenes para que la barra de
+ * pestañas se lea como una unidad con el contenido de la sección. */
+.iem-tabs-head {
+    margin-bottom: 0;
+}
+.iem-tabs-head .iem-tabs {
+    margin-bottom: 0;
+}
+/* El .wrap de la sección que sigue a la cabecera pega su contenido a las tabs. */
+.iem-tabs-head + .wrap {
+    margin-top: 0;
+}
+/* La sección ya no necesita repetir un H1 gigante bajo las pestañas:
+ * lo degradamos visualmente para que funcione como subtítulo de contexto. */
+.iem-tabs-head + .wrap > h1.wp-heading-inline {
+    font-size: 1.3em;
+    margin-top: 12px;
+}
+
+/* ── Cards / panels ───────────────────────────────────────────────── */
+.iem-card {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+    padding: 16px 20px;
+}
+.iem-card > h2:first-child,
+.iem-card > h3:first-child { margin-top: 0; }
+
+/* ── Filter bar (search + selects encima de listados) ────────────── */
+.iem-filter-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 14px 0 12px;
+}
+
+/* ── Helper text (italic gris para hints/notas) ──────────────────── */
+.iem-help {
+    color: #666;
+    font-style: italic;
+    font-size: 12px;
+}
+.iem-help-block { display: block; margin-top: 8px; }
+
+/* ── Monospace inline (SKUs, códigos, IDs) ───────────────────────── */
+.iem-mono { font-family: Menlo, Consolas, "Liberation Mono", monospace; }
+
+/* ── Status spans (OK / Error / Muted) ───────────────────────────── */
+.iem-status        { font-weight: 600; }
+.iem-status-ok     { color: #107010; font-weight: 600; }
+.iem-status-err    { color: #a00;    font-weight: 600; }
+.iem-status-warn   { color: #d68f00; font-weight: 600; }
+.iem-status-muted  { color: #888; }
+
+/* ── Row backgrounds (highlight por estado) ──────────────────────── */
+.iem-row-ok      { background: #f1faf1 !important; }
+.iem-row-revisar { background: #fdecec !important; }
+.iem-row-extra   { box-shadow: inset 4px 0 0 #d68f00; }
+
+/* ── Thumbnails (unifica .iem-h-thumb-* y .iem-mc-thumb-*) ───────── */
+.iem-thumb { padding: 4px !important; vertical-align: middle; text-align: center; }
+.iem-thumb-img {
+    width: 40px; height: 40px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    display: inline-block;
+    background: #fafafa;
+}
+.iem-thumb-ph {
+    display: inline-block;
+    width: 40px; height: 40px; line-height: 40px;
+    background: #f4f4f4;
+    border: 1px dashed #ccc;
+    border-radius: 4px;
+    text-align: center; color: #bbb; font-size: 11px;
+}
+
+/* ── Category chips (unifica .iem-mc-cat-* + .iem-kx-cat-*) ──────── */
+.iem-chips {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    margin: 6px 0 12px;
+}
+.iem-chips__label { font-weight: 600; color: #444; margin-right: 4px; }
+.iem-chip {
+    font-size: 12px !important;
+    padding: 0 10px !important;
+    height: 26px !important;
+    line-height: 24px !important;
+}
+.iem-chip.is-active {
+    background: #2271b1 !important;
+    color: #fff !important;
+    border-color: #2271b1 !important;
+}
+
+/* ── Pills / badges ──────────────────────────────────────────────── */
+.iem-badge-extra {
+    display: inline-block;
+    background: #ffe7a0; color: #5a3d00;
+    font-size: 11px; line-height: 1;
+    padding: 3px 7px; border-radius: 99px;
+    font-weight: 600; margin-left: 6px;
+}
+
+/* ── Meta strip (info de cabecera en histórico/compras) ──────────── */
+.iem-meta {
+    display: flex; gap: 24px; flex-wrap: wrap;
+    margin: 14px 0;
+    padding: 10px 14px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+.iem-meta span { font-size: 13px; }
+
+/* ── Save state (indicador de autosave por fila) ─────────────────── */
+.iem-savestate { display: inline-block; font-size: 12px; min-width: 14px; }
+.iem-savestate.saving { color: #888; }
+.iem-savestate.saved  { color: #107010; }
+.iem-savestate.error  { color: #a00; }
+
+/* ── Alineaciones numéricas (saldos, totales) ────────────────────── */
+.iem-num   { text-align: right; font-family: Menlo, Consolas, "Liberation Mono", monospace; }
+.iem-num-b { text-align: right; font-family: Menlo, Consolas, "Liberation Mono", monospace; font-weight: 600; }
+
+/* ── Compat: aliases para clases viejas (todavía referenciadas por
+ *    los <style> locales que aún no migramos). Se eliminarán cuando
+ *    la migración esté completa.
+ */
+.iem-mc-cat-filters { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:14px 0; }
+.iem-mc-cat-label   { font-weight:600; margin-right:4px; }
+.iem-mc-cat-btn     { font-size:12px !important; padding:0 10px !important; height:26px !important; line-height:24px !important; }
+.iem-mc-cat-active  { background:#2271b1 !important; color:#fff !important; border-color:#2271b1 !important; }

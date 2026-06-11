@@ -16,10 +16,7 @@ if (!defined('ABSPATH')) {
  */
 $is_draft   = $session['status'] === 'draft';
 $suc_name   = $sucursales[$session['sucursal_slug']] ?? $session['sucursal_slug'];
-$back_url   = add_query_arg([
-    'post_type' => 'product',
-    'page'      => IEM_Admin::PAGE_HISTORICO,
-], admin_url('edit.php'));
+$back_url   = IEM_Admin::tab_url('historico');
 
 $export_url = add_query_arg([
     'action'                 => 'iem_export_session',
@@ -44,7 +41,7 @@ $reopen_url = add_query_arg([
     <?php endif; ?>
     <hr class="wp-header-end">
 
-    <div class="iem-meta">
+    <div class="iem-meta iem-meta-historico">
         <span><strong>Estado:</strong>
             <?php if ($is_draft): ?>
                 <span style="color:#a67c00;font-weight:600;">Borrador (autoguardado)</span>
@@ -98,11 +95,11 @@ $reopen_url = add_query_arg([
         if (!$tid && $pid > 0 && $pid !== $iid) $tid = (int) get_post_thumbnail_id($pid);
         if ($tid) {
             return wp_get_attachment_image($tid, [40, 40], false, [
-                'class' => 'iem-h-thumb-img',
+                'class' => 'iem-thumb-img',
                 'alt'   => '',
             ]);
         }
-        return '<span class="iem-h-thumb-ph" aria-hidden="true">—</span>';
+        return '<span class="iem-thumb-ph" aria-hidden="true">—</span>';
     };
     ?>
 
@@ -117,7 +114,8 @@ $reopen_url = add_query_arg([
                 <th style="width:11%">Notas</th>
                 <th style="width:11%">Conteo</th>
                 <th style="width:8%">Estado</th>
-                <th style="width:8%">Merma</th>
+                <th style="width:7%">Merma</th>
+                <th style="width:5%">Kardex</th>
             </tr>
         </thead>
         <tbody>
@@ -130,7 +128,7 @@ $reopen_url = add_query_arg([
             <tr class="<?php echo esc_attr(trim($row_cls)); ?>"
                 data-sku="<?php echo esc_attr(strtolower((string) $l['sku'])); ?>"
                 data-name="<?php echo esc_attr(strtolower((string) $l['name'])); ?>">
-                <td class="iem-h-thumb"><?php echo $iem_h_thumb($l); ?></td>
+                <td class="iem-thumb"><?php echo $iem_h_thumb($l); ?></td>
                 <td>
                     <code><?php echo esc_html($l['sku'] ?: '—'); ?></code>
                     <?php if ($is_extra): ?>
@@ -158,7 +156,7 @@ $reopen_url = add_query_arg([
                 </td>
                 <td>
                     <?php if ($is_extra || (int) $l['item_id'] === 0): ?>
-                        <span style="color:#888;font-size:12px;font-style:italic;">N/A</span>
+                        <span class="iem-help" style="font-size:12px;">N/A</span>
                     <?php else: ?>
                         <button type="button" class="button button-small iem-merma-btn"
                                 data-item-id="<?php echo (int) $l['item_id']; ?>"
@@ -167,6 +165,17 @@ $reopen_url = add_query_arg([
                                 data-session-id="<?php echo (int) $session['id']; ?>">
                             Merma
                         </button>
+                    <?php endif; ?>
+                </td>
+                <td>
+                    <?php if ($is_extra || (int) $l['item_id'] === 0): ?>
+                        <span class="iem-help" style="font-size:12px;">—</span>
+                    <?php else:
+                        $kx_url = IEM_Admin::tab_url('kardex', ['item_id' => (int) $l['item_id']]);
+                    ?>
+                        <a href="<?php echo esc_url($kx_url); ?>"
+                           class="button button-small"
+                           title="Ver kardex de este ítem">📊</a>
                     <?php endif; ?>
                 </td>
             </tr>
@@ -200,6 +209,12 @@ $reopen_url = add_query_arg([
                 Descontar del stock de WooCommerce
             </label>
         </p>
+        <p>
+            <label>Nota / defecto encontrado:
+                <textarea id="iem-m-notes" rows="3" style="width:100%;"
+                          placeholder="Ej.: rayón en la tapa, costura abierta…"></textarea>
+            </label>
+        </p>
         <p id="iem-m-err" style="color:#a00;display:none;"></p>
         <p style="text-align:right;">
             <button type="button" class="button" id="iem-m-cancel">Cancelar</button>
@@ -209,28 +224,15 @@ $reopen_url = add_query_arg([
 </div>
 
 <style>
-.iem-meta { display:flex; gap:24px; flex-wrap:wrap; margin:14px 0; padding:10px 14px;
-            background:#f6f7f7; border-left:4px solid #2271b1; }
-.iem-meta span { font-size:13px; }
-.iem-table .iem-estado { font-weight:600; }
-.iem-table .iem-estado-ok       { color:#107010; }
-.iem-table .iem-estado-revisar  { color:#a00; }
-.iem-table .iem-estado-sin-conteo { color:#888; }
-.iem-table tbody tr.iem-row-ok      { background:#f1faf1 !important; }
-.iem-table tbody tr.iem-row-revisar { background:#fdecec !important; }
-.iem-table tbody tr.iem-row-extra   { box-shadow: inset 4px 0 0 #d68f00; }
-.iem-savestate { display:inline-block; margin-left:6px; font-size:12px; min-width:60px; }
-.iem-savestate.saving { color:#888; }
-.iem-savestate.saved  { color:#107010; }
-.iem-savestate.error  { color:#a00; }
-.iem-badge-extra { display:inline-block; background:#ffe7a0; color:#5a3d00;
-                   padding:1px 6px; border-radius:8px; font-size:10px;
-                   font-weight:700; letter-spacing:0.5px; }
-.iem-h-thumb     { padding:4px !important; vertical-align:middle; text-align:center; }
-.iem-h-thumb-img { width:40px; height:40px; object-fit:cover; border-radius:4px; border:1px solid #ddd; display:inline-block; background:#fafafa; }
-.iem-h-thumb-ph  { display:inline-block; width:40px; height:40px; line-height:40px;
-                   background:#f4f4f4; border:1px dashed #ccc; border-radius:4px;
-                   text-align:center; color:#bbb; font-size:11px; }
+/* Locales: meta con border-left e indicador "estado" textual. El resto de
+ * utilidades (.iem-row-*, .iem-savestate, .iem-thumb-*, .iem-badge-extra)
+ * vienen de assets/css/admin.css (v3.25+). */
+.iem-meta-historico { border-left: 4px solid #2271b1; }
+.iem-table .iem-estado            { font-weight: 600; }
+.iem-table .iem-estado-ok         { color: #107010; }
+.iem-table .iem-estado-revisar    { color: #a00; }
+.iem-table .iem-estado-sin-conteo { color: #888; }
+.iem-savestate { margin-left: 6px; min-width: 60px; }
 </style>
 
 <script>
@@ -327,6 +329,7 @@ $reopen_url = add_query_arg([
             document.getElementById('iem-m-name').textContent = btn.dataset.name;
             document.getElementById('iem-m-qty').value = 1;
             document.getElementById('iem-m-decrement').checked = false;
+            document.getElementById('iem-m-notes').value = '';
             document.getElementById('iem-m-err').style.display = 'none';
             modal.style.display = 'flex';
             return;
@@ -344,7 +347,8 @@ $reopen_url = add_query_arg([
                 session_id:    current.session_id,
                 qty:           document.getElementById('iem-m-qty').value,
                 tipo:          document.getElementById('iem-m-tipo').value,
-                decrement_wc:  document.getElementById('iem-m-decrement').checked ? 1 : 0
+                decrement_wc:  document.getElementById('iem-m-decrement').checked ? 1 : 0,
+                notes:         document.getElementById('iem-m-notes').value
             }, function(e2, res){
                 if (e2 || !res.ok || !res.j.success) {
                     err.textContent = (res && res.j && res.j.data && res.j.data.message) || 'Error guardando merma.';

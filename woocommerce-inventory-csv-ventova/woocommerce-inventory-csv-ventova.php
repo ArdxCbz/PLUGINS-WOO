@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: WooCommerce Inventario por Sucursal VENTOVA
-Description: Submenú "Inventario Ventova" bajo Productos. Conteo físico por sucursal con persistencia mensual, registro de mermas/defectuosos y exportación CSV (inventario unificado, por sucursal, conteo físico, histórico de conteos, mermas). Incluye productos de la categoría TIENDA (también los ocultos) bajo Santa Cruz.
-Version: 3.13
+Description: Submenú "Inventario Ventova" bajo Productos. Conteo físico por sucursal con persistencia mensual, registro de mermas/defectuosos, proveedores, compras (suman stock y actualizan costos al recibir), kardex (ledger central de movimientos con saldo corrido) y exportación CSV. Incluye productos de la categoría TIENDA (también los ocultos) bajo Santa Cruz.
+Version: 3.49
 Author: Ardx
 Requires Plugins: woocommerce
 */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 
 define('IEM_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('IEM_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('IEM_VERSION', '3.13');
+define('IEM_VERSION', '3.49');
 
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-schema.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-permisos.php';
@@ -21,7 +21,11 @@ require_once IEM_PLUGIN_DIR . 'includes/class-iem-sucursales.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-collector.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-csv.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-counts.php';
+require_once IEM_PLUGIN_DIR . 'includes/class-iem-kardex.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-mermas.php';
+require_once IEM_PLUGIN_DIR . 'includes/class-iem-suppliers.php';
+require_once IEM_PLUGIN_DIR . 'includes/class-iem-purchases.php';
+require_once IEM_PLUGIN_DIR . 'includes/class-iem-import-costs.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-ajax.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-admin.php';
 

@@ -28,7 +28,8 @@ if (!function_exists('iem_action_url')) {
 
     <form method="get" action="" style="margin:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
         <input type="hidden" name="post_type" value="product">
-        <input type="hidden" name="page" value="<?php echo esc_attr(IEM_Admin::PAGE_HISTORICO); ?>">
+        <input type="hidden" name="page" value="<?php echo esc_attr(IEM_Admin::PAGE_SLUG); ?>">
+        <input type="hidden" name="tab" value="historico">
 
         <label>Período (YYYY-MM):
             <input type="text" name="f_period" value="<?php echo esc_attr($filter['period']); ?>"
@@ -74,11 +75,7 @@ if (!function_exists('iem_action_url')) {
             <tbody>
             <?php foreach ($sessions as $s):
                 $is_draft = $s['status'] === 'draft';
-                $detail_url = add_query_arg([
-                    'post_type'  => 'product',
-                    'page'       => IEM_Admin::PAGE_HISTORICO,
-                    'session_id' => (int) $s['id'],
-                ], admin_url('edit.php'));
+                $detail_url = IEM_Admin::tab_url('historico', ['session_id' => (int) $s['id']]);
 
                 $export_url = iem_action_url('iem_export_session', ['session_id' => (int) $s['id']],
                     IEM_Admin::NONCE_FIELD, $nonce);
@@ -92,9 +89,9 @@ if (!function_exists('iem_action_url')) {
                     <td><?php echo esc_html($sucursales[$s['sucursal_slug']] ?? $s['sucursal_slug']); ?></td>
                     <td>
                         <?php if ($is_draft): ?>
-                            <span style="color:#a67c00;font-weight:600;">Borrador</span>
+                            <span class="iem-status-warn">Borrador</span>
                         <?php else: ?>
-                            <span style="color:#107010;font-weight:600;">Cerrado</span>
+                            <span class="iem-status-ok">Cerrado</span>
                         <?php endif; ?>
                     </td>
                     <td><?php echo esc_html($s['created_at']); ?></td>

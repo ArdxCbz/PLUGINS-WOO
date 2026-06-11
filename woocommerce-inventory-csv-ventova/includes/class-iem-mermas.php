@@ -48,6 +48,7 @@ class IEM_Mermas
             'user_id'       => get_current_user_id(),
             'session_id'    => null,
             'decrement_wc'  => false,
+            'notes'         => '',
         ], $args);
 
         if ((int) $args['item_id'] <= 0
@@ -88,12 +89,11 @@ class IEM_Mermas
                 return new WP_Error('iem_no_stock_mgmt',
                     'El producto no gestiona stock; no se puede descontar de WooCommerce.');
             }
-            // wc_update_product_stock con un WC_Product_Variation decrementa
-            // el _stock de la variación (el "producto hijo"), no del padre.
-            $new_qty = wc_update_product_stock($product, (int) $args['qty'], 'decrease');
-            if ($new_qty === false || is_wp_error($new_qty)) {
-                return new WP_Error('iem_decrement_failed',
-                    'No se pudo descontar del stock de WooCommerce.');
+            // Decremento silencioso (no dispara `manual_wc` en el kardex; lo
+            // registramos explícitamente abajo con tipo `merma`).
+            $r = IEM_Kardex::update_wc_stock_silent((int) $product->get_id(), (int) $args['qty'], 'O');
+            if (is_wp_error($r)) {
+                return $r;
             }
             $decremented = 1;
         }
@@ -111,12 +111,29 @@ class IEM_Mermas
             'session_id'       => $args['session_id'] ? (int) $args['session_id'] : null,
             'decremented_wc'   => $decremented,
             'cost_at_register' => $cost_snapshot,
+            'notes'            => trim((string) $args['notes']),
             'created_at'       => current_time('mysql'),
         ]);
         if (!$ok) {
             return new WP_Error('iem_db_insert', 'No se pudo guardar la merma.');
         }
-        return (int) $wpdb->insert_id;
+        $merma_id = (int) $wpdb->insert_id;
+
+        // Kardex: solo si se descontó WC (si no, no hubo movimiento de stock).
+        if ($decremented === 1) {
+            IEM_Kardex::insert_movement([
+                'item_id'       => (int) $product->get_id(),
+                'type'          => IEM_Kardex::TYPE_MERMA,
+                'direction'     => 'O',
+                'qty'           => (int) $args['qty'],
+                'unit_cost'     => $cost_snapshot,
+                'sucursal_slug' => (string) $args['sucursal_slug'],
+                'ref_table'     => 'mermas',
+                'ref_id'        => $merma_id,
+                'notes'         => 'Merma tipo: ' . $args['tipo'],
+            ]);
+        }
+        return $merma_id;
     }
 
     /**
@@ -152,20 +169,24 @@ class IEM_Mermas
 
         // Espejo del registro original: si decrementó WC, ahora se incrementa.
         if ((int) $row['decremented_wc'] === 1) {
-            $product = wc_get_product((int) $row['item_id']);
-            if (!$product) {
-                return new WP_Error('iem_no_product',
-                    'No se encuentra el producto original; no se puede retornar el stock.');
+            $r = IEM_Kardex::update_wc_stock_silent((int) $row['item_id'], (int) $row['qty'], 'I');
+            if (is_wp_error($r)) {
+                return $r;
             }
-            if (!$product->managing_stock()) {
-                return new WP_Error('iem_no_stock_mgmt',
-                    'El producto ya no gestiona stock; no se puede retornar la cantidad.');
-            }
-            $new_qty = wc_update_product_stock($product, (int) $row['qty'], 'increase');
-            if ($new_qty === false || is_wp_error($new_qty)) {
-                return new WP_Error('iem_increase_failed',
-                    'No se pudo incrementar el stock de WooCommerce.');
-            }
+            // Kardex: contraparte explícita del movimiento `merma` original.
+            IEM_Kardex::insert_movement([
+                'item_id'       => (int) $row['item_id'],
+                'type'          => IEM_Kardex::TYPE_MERMA_RETURN,
+                'direction'     => 'I',
+                'qty'           => (int) $row['qty'],
+                'unit_cost'     => isset($row['cost_at_register']) && $row['cost_at_register'] !== null
+                                    ? (float) $row['cost_at_register']
+                                    : null,
+                'sucursal_slug' => (string) $row['sucursal_slug'],
+                'ref_table'     => 'mermas',
+                'ref_id'        => (int) $row['id'],
+                'notes'         => 'Retorno de merma',
+            ]);
         }
 
         $ok = $wpdb->update($t,
@@ -179,6 +200,40 @@ class IEM_Mermas
         );
         if ($ok === false) {
             return new WP_Error('iem_db_update', 'No se pudo marcar la merma como retornada.');
+        }
+        return true;
+    }
+
+    /**
+     * Edita la nota (descripción del defecto) de una merma existente.
+     * Permitido en cualquier estado (incluso retornada): la nota es una
+     * anotación descriptiva, no afecta stock ni kardex.
+     *
+     * @param int    $id
+     * @param string $notes  Texto libre (se sanitiza con sanitize_textarea_field
+     *                       en la capa que lo recibe; aquí solo se hace trim).
+     * @return true|WP_Error
+     */
+    public static function update_notes($id, $notes)
+    {
+        $id = (int) $id;
+        if ($id <= 0) {
+            return new WP_Error('iem_invalid', 'Merma inválida.');
+        }
+        global $wpdb;
+        $t   = IEM_Schema::table('mermas');
+        $row = $wpdb->get_row($wpdb->prepare("SELECT id FROM $t WHERE id = %d", $id), ARRAY_A);
+        if (!$row) {
+            return new WP_Error('iem_not_found', 'Merma no encontrada.');
+        }
+        $ok = $wpdb->update($t,
+            ['notes' => trim((string) $notes)],
+            ['id' => $id],
+            ['%s'],
+            ['%d']
+        );
+        if ($ok === false) {
+            return new WP_Error('iem_db_update', 'No se pudo guardar la nota.');
         }
         return true;
     }

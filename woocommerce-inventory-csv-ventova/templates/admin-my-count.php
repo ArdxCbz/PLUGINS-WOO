@@ -144,11 +144,11 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
         if (!$tid && $pid > 0 && $pid !== $iid) $tid = (int) get_post_thumbnail_id($pid);
         if ($tid) {
             return wp_get_attachment_image($tid, [40, 40], false, [
-                'class' => 'iem-mc-thumb-img',
+                'class' => 'iem-thumb-img',
                 'alt'   => '',
             ]);
         }
-        return '<span class="iem-mc-thumb-ph" aria-hidden="true">—</span>';
+        return '<span class="iem-thumb-ph" aria-hidden="true">—</span>';
     };
 
     // Set único de categorías presentes en las filas del snapshot original.
@@ -208,7 +208,7 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
             <tr class="<?php echo esc_attr($row_cls); ?>"
                 data-line-id="<?php echo (int) $L['id']; ?>"
                 data-categories="<?php echo esc_attr($row_cats_attr); ?>">
-                <td class="iem-mc-thumb"><?php echo $iem_mc_thumb($L); ?></td>
+                <td class="iem-thumb"><?php echo $iem_mc_thumb($L); ?></td>
                 <td><code><?php echo esc_html($L['sku']); ?></code></td>
                 <td><?php echo esc_html($L['name']); ?></td>
                 <td><?php echo esc_html($L['category']); ?></td>
@@ -262,7 +262,7 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
                 if ($status === 'Revisar') $row_cls = 'iem-row-revisar';
         ?>
             <tr class="iem-mc-extra-row <?php echo esc_attr($row_cls); ?>" data-line-id="<?php echo (int) $L['id']; ?>">
-                <td class="iem-mc-thumb"><?php echo $iem_mc_thumb($L); ?></td>
+                <td class="iem-thumb"><?php echo $iem_mc_thumb($L); ?></td>
                 <td><code><?php echo esc_html($L['sku'] ?: '—'); ?></code></td>
                 <td><?php echo esc_html($L['name']); ?></td>
                 <td style="font-size:12px;color:#555;"><?php echo esc_html($L['notes'] ?? ''); ?></td>
@@ -342,22 +342,9 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
 </div>
 
 <style>
-.iem-row-ok      { background: #f1faf1 !important; }
-.iem-row-revisar { background: #fdecec !important; }
-.iem-mc-save     { font-size: 11px; }
-
-.iem-mc-thumb { padding:4px !important; vertical-align:middle; text-align:center; }
-.iem-mc-thumb-img { width:40px; height:40px; object-fit:cover; border-radius:4px; border:1px solid #ddd; display:inline-block; background:#fafafa; }
-.iem-mc-thumb-ph {
-    display:inline-block; width:40px; height:40px; line-height:40px;
-    background:#f4f4f4; border:1px dashed #ccc; border-radius:4px;
-    text-align:center; color:#bbb; font-size:11px;
-}
-
-.iem-mc-cat-filters       { margin:14px 0; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-.iem-mc-cat-label         { font-weight:600; margin-right:4px; }
-.iem-mc-cat-btn           { padding:2px 12px; }
-.iem-mc-cat-active        { background:#2271b1 !important; color:#fff !important; border-color:#135e96 !important; }
+/* Locales únicos. El resto (.iem-row-*, .iem-thumb-*, .iem-mc-cat-* alias)
+ * viene de assets/css/admin.css (v3.25+). */
+.iem-mc-save { font-size: 11px; }
 </style>
 
 <script>
@@ -491,7 +478,7 @@ $page_url = admin_url('admin.php?page=' . IEM_Admin::PAGE_MY_COUNT);
         tr.className = 'iem-mc-extra-row ' + rowCls;
         tr.dataset.lineId = L.id;
         tr.innerHTML =
-            '<td class="iem-mc-thumb"><span class="iem-mc-thumb-ph" aria-hidden="true">—</span></td>' +
+            '<td class="iem-thumb"><span class="iem-thumb-ph" aria-hidden="true">—</span></td>' +
             '<td><code>' + escapeHtml(L.sku || '—') + '</code></td>' +
             '<td>' + escapeHtml(L.name) + '</td>' +
             '<td style="font-size:12px;color:#555;">' + escapeHtml(L.notes || '') + '</td>' +

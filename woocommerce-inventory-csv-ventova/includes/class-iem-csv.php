@@ -171,7 +171,7 @@ class IEM_CSV
         fputcsv($out, self::safe_row([
             'SKU', 'Producto', 'Sucursal', 'Tipo producto',
             'Fecha', 'Cantidad', 'Costo unitario', 'Subtotal',
-            'Tipo', 'Descontó WC', 'Usuario', 'Sesión',
+            'Tipo', 'Nota / Defecto', 'Descontó WC', 'Usuario', 'Sesión',
             'Retornada', 'Fecha retorno', 'Retornada por',
         ]));
 
@@ -199,6 +199,7 @@ class IEM_CSV
                 $unit_cost !== null ? number_format($unit_cost, 2, '.', '') : '',
                 $subtotal  !== null ? number_format($subtotal,  2, '.', '') : '',
                 $tipo,
+                (string) ($m['notes'] ?? ''),
                 !empty($m['decremented_wc']) ? 'Sí' : 'No',
                 $user ? $user->display_name : '#' . (int) $m['user_id'],
                 $m['session_id'] ? (int) $m['session_id'] : '',
@@ -214,6 +215,176 @@ class IEM_CSV
         fputcsv($out, self::safe_row([
             'TOTAL', '', '', '', '', $total_qty, '', number_format($total_sub, 2, '.', ''),
         ]));
+
+        fclose($out);
+        exit;
+    }
+
+    /**
+     * Stream de compras (Fase 4.2+). Una fila por LÍNEA de compra; las columnas
+     * de cabecera se repiten en cada fila para análisis en Excel.
+     *
+     * @param string $filename
+     * @param array  $purchases       Filas de iem_purchases.
+     * @param array  $lines_by_pid    purchase_id => [lines].
+     * @param array  $suppliers_map   supplier_id => name.
+     * @param array  $sucursales_map  slug => name.
+     */
+    public static function stream_purchases($filename, array $purchases, array $lines_by_pid,
+                                            array $suppliers_map = [], array $sucursales_map = [])
+    {
+        nocache_headers();
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
+        fputcsv($out, self::safe_row([
+            'Código compra', 'Estado', 'Fecha compra', 'Fecha recepción',
+            'Proveedor (defecto)', 'Sucursal destino', 'Nro factura',
+            'SKU línea', 'Producto línea', 'Proveedor línea', 'ID variación recibida',
+            'Cantidad', 'Costo unitario', 'Costo origen USD', 'Subtotal línea',
+            'Total compra', 'Notas',
+        ]));
+
+        $total_qty  = 0;
+        $total_sub  = 0.0;
+
+        foreach ($purchases as $p) {
+            $pid       = (int) $p['id'];
+            $sup_name  = $suppliers_map[(int) $p['supplier_id']] ?? ('#' . (int) $p['supplier_id']);
+            $suc_name  = $sucursales_map[$p['sucursal_slug']] ?? $p['sucursal_slug'];
+            $lines     = $lines_by_pid[$pid] ?? [];
+
+            if (empty($lines)) {
+                fputcsv($out, self::safe_row([
+                    $p['code'], $p['status'], $p['purchase_date'], $p['received_date'] ?: '',
+                    $sup_name, $suc_name, $p['invoice_number'] ?? '',
+                    '', '(sin líneas)', '', '', 0, '', '', '',
+                    number_format((float) $p['total'], 2, '.', ''),
+                    $p['notes'] ?? '',
+                ]));
+                continue;
+            }
+
+            foreach ($lines as $L) {
+                $qty         = (int) $L['qty'];
+                $unit_cost   = (float) $L['unit_cost'];
+                $origin_cost = (float) ($L['origin_cost'] ?? 0);
+                $subtotal    = round($qty * $unit_cost, 2);
+                $line_sup    = (int) ($L['supplier_id'] ?? 0) > 0
+                    ? ($suppliers_map[(int) $L['supplier_id']] ?? ('#' . (int) $L['supplier_id']))
+                    : '';
+                $total_qty += $qty;
+                $total_sub += $subtotal;
+
+                fputcsv($out, self::safe_row([
+                    $p['code'], $p['status'], $p['purchase_date'], $p['received_date'] ?: '',
+                    $sup_name, $suc_name, $p['invoice_number'] ?? '',
+                    $L['sku'], $L['name'], $line_sup,
+                    (int) $L['received_variation_id'] ?: '',
+                    $qty,
+                    number_format($unit_cost, 4, '.', ''),
+                    $origin_cost > 0 ? number_format($origin_cost, 2, '.', '') : '',
+                    number_format($subtotal,  2, '.', ''),
+                    number_format((float) $p['total'], 2, '.', ''),
+                    $p['notes'] ?? '',
+                ]));
+            }
+        }
+
+        fputcsv($out, []);
+        fputcsv($out, self::safe_row([
+            'TOTAL', '', '', '', '', '', '', '', '', '', '',
+            $total_qty, '', '', number_format($total_sub, 2, '.', ''),
+            '', '',
+        ]));
+
+        fclose($out);
+        exit;
+    }
+
+    /**
+     * Stream del kardex (Fase 4.2+). Una fila por movimiento, en orden
+     * cronológico ASC. Incluye SKU + nombre resueltos vía postmeta/posts en
+     * un batch para no hacer N+1.
+     *
+     * @param string $filename
+     * @param array  $movements      Filas de iem_kardex.
+     * @param array  $types_map      IEM_Kardex::get_types().
+     * @param array  $sucursales_map slug => name.
+     */
+    public static function stream_kardex($filename, array $movements,
+                                         array $types_map = [], array $sucursales_map = [])
+    {
+        nocache_headers();
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
+        // Batch lookup: item_id => ['sku','name','parent_name'].
+        $item_ids = array_values(array_unique(array_map(function ($m) { return (int) $m['item_id']; }, $movements)));
+        $info = [];
+        if (!empty($item_ids)) {
+            global $wpdb;
+            $ph = implode(',', array_fill(0, count($item_ids), '%d'));
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT p.ID, p.post_title AS name, pp.post_title AS parent_name,
+                        COALESCE(sku.meta_value, '') AS sku
+                 FROM {$wpdb->posts} p
+                 LEFT JOIN {$wpdb->posts} pp ON pp.ID = p.post_parent
+                                             AND p.post_type = 'product_variation'
+                 LEFT JOIN {$wpdb->postmeta} sku ON sku.post_id = p.ID
+                                               AND sku.meta_key  = '_sku'
+                 WHERE p.ID IN ($ph)",
+                ...$item_ids
+            ), ARRAY_A);
+            foreach ($rows as $r) {
+                $info[(int) $r['ID']] = [
+                    'sku'         => (string) $r['sku'],
+                    'name'        => (string) $r['name'],
+                    'parent_name' => (string) $r['parent_name'],
+                ];
+            }
+        }
+
+        fputcsv($out, self::safe_row([
+            'Fecha', 'Tipo', 'Dirección', 'Cantidad', 'Costo unitario', 'Costo origen USD', 'Saldo después',
+            'Item ID', 'SKU', 'Producto', 'Sucursal',
+            'Referencia', 'Notas', 'Usuario',
+        ]));
+
+        foreach ($movements as $m) {
+            $iid    = (int) $m['item_id'];
+            $i      = $info[$iid] ?? ['sku' => '', 'name' => '', 'parent_name' => ''];
+            $name   = $i['parent_name'] !== '' && $i['parent_name'] !== $i['name']
+                    ? $i['parent_name'] . ' — ' . $i['name']
+                    : $i['name'];
+            // Snapshot histórico del costo de origen en este movimiento (lo
+            // llena `purchase`; NULL en el resto).
+            $ocost  = (isset($m['origin_cost']) && $m['origin_cost'] !== null) ? (float) $m['origin_cost'] : 0;
+            $suc    = $sucursales_map[$m['sucursal_slug']] ?? $m['sucursal_slug'];
+            $type   = $types_map[(string) $m['type']] ?? $m['type'];
+            $ref    = '';
+            if (!empty($m['ref_code']))                              { $ref = (string) $m['ref_code']; }
+            elseif (!empty($m['ref_table']) && !empty($m['ref_id'])) { $ref = $m['ref_table'] . ' #' . (int) $m['ref_id']; }
+
+            $user = (int) $m['user_id'] ? get_user_by('id', (int) $m['user_id']) : null;
+
+            fputcsv($out, self::safe_row([
+                $m['movement_date'], $type, $m['direction'] === 'I' ? '+' : '−',
+                (int) $m['qty'],
+                $m['unit_cost'] !== null ? number_format((float) $m['unit_cost'], 4, '.', '') : '',
+                $ocost > 0 ? number_format($ocost, 2, '.', '') : '',
+                (int) $m['balance_after'],
+                $iid, $i['sku'], $name, $suc,
+                $ref, $m['notes'] ?? '',
+                $user ? $user->display_name : ((int) $m['user_id'] ? '#' . (int) $m['user_id'] : ''),
+            ]));
+        }
 
         fclose($out);
         exit;

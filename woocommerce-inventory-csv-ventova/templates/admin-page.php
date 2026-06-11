@@ -14,10 +14,12 @@ if (!defined('ABSPATH')) {
  * @var string $base_url                  admin-post.php.
  * @var string $url_descargar_unificado   URL para descargar CSV unificado.
  * @var string $url_descargar_sucursal    URL para descargar CSV de la sucursal filtrada.
+ * @var array  $last_purchase             item_id => ['received_date','unit_cost','purchase_code',...] (Fase 4.1).
  */
+$iem_kardex_base = IEM_Admin::tab_url('kardex');
 ?>
 <div class="wrap">
-    <h1 class="wp-heading-inline">Inventario Ventova</h1>
+    <h1 class="wp-heading-inline">Listado de inventario</h1>
     <a href="<?php echo esc_url($url_descargar_unificado); ?>" class="page-title-action">Descargar Inventario Unificado</a>
     <?php if ($sucursal_filter !== ''): ?>
         <a href="<?php echo esc_url($url_descargar_sucursal); ?>" class="page-title-action">
@@ -47,7 +49,7 @@ if (!defined('ABSPATH')) {
                         Iniciar conteo persistido
                     </a>
                 </p>
-                <p style="color:#666;font-style:italic;margin:6px 0 0;">
+                <p class="iem-help" style="margin:6px 0 0;">
                     Iniciar tomará una "foto" del inventario actual y abrirá la pantalla de conteo;
                     los valores se autoguardan a medida que tipeas.
                 </p>
@@ -140,18 +142,23 @@ if (!defined('ABSPATH')) {
             <table class="wp-list-table widefat fixed striped iem-table">
                 <thead>
                     <tr>
-                        <th style="width:14%">SKU</th>
-                        <th style="width:28%">Producto</th>
-                        <th style="width:8%">Stock</th>
-                        <th style="width:14%">Sucursal</th>
-                        <th style="width:12%">Conteo</th>
-                        <th style="width:10%">Estado</th>
-                        <th style="width:14%">Categoría</th>
+                        <th style="width:13%">SKU</th>
+                        <th style="width:23%">Producto</th>
+                        <th style="width:6%">Stock</th>
+                        <th style="width:11%">Sucursal</th>
+                        <th style="width:12%">Última compra</th>
+                        <th style="width:10%">Conteo</th>
+                        <th style="width:8%">Estado</th>
+                        <th style="width:12%">Categoría</th>
+                        <th style="width:5%">Kardex</th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php foreach ($rows as $r):
                     $row_cats_lower = array_map('strtolower', array_map('trim', $r['categories'] ?? []));
+                    $iid = (int) $r['item_id'];
+                    $lp  = $last_purchase[$iid] ?? null;
+                    $kardex_url = add_query_arg(['item_id' => $iid], $iem_kardex_base);
                 ?>
                     <tr data-sku="<?php echo esc_attr(strtolower($r['sku'])); ?>"
                         data-name="<?php echo esc_attr(strtolower($r['name'])); ?>"
@@ -161,14 +168,39 @@ if (!defined('ABSPATH')) {
                         <td><?php echo (int) $r['stock']; ?></td>
                         <td><?php echo esc_html($r['sucursal_name']); ?></td>
                         <td>
+                            <?php if ($lp): ?>
+                                <?php
+                                    $tip = sprintf(
+                                        '%s · costo %s · qty %d',
+                                        $lp['purchase_code'] ?: ('Compra #' . $lp['purchase_id']),
+                                        number_format($lp['unit_cost'], 4, '.', ','),
+                                        $lp['qty']
+                                    );
+                                ?>
+                                <span title="<?php echo esc_attr($tip); ?>">
+                                    <?php echo esc_html($lp['received_date']); ?>
+                                    <br><small class="iem-help" style="font-style:normal;">
+                                        Bs. <?php echo esc_html(number_format($lp['unit_cost'], 2, '.', ',')); ?>
+                                    </small>
+                                </span>
+                            <?php else: ?>
+                                <span class="iem-status-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
                             <input type="number" min="0" step="1"
                                    class="iem-conteo small-text"
-                                   name="conteo[<?php echo (int) $r['item_id']; ?>]"
+                                   name="conteo[<?php echo $iid; ?>]"
                                    data-stock="<?php echo (int) $r['stock']; ?>"
                                    style="width:100px;">
                         </td>
                         <td class="iem-estado">—</td>
                         <td><?php echo esc_html($r['category']); ?></td>
+                        <td>
+                            <a href="<?php echo esc_url($kardex_url); ?>"
+                               class="button button-small"
+                               title="Ver kardex de este ítem">📊</a>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -178,15 +210,14 @@ if (!defined('ABSPATH')) {
 </div>
 
 <style>
-    .iem-table .iem-estado              { font-weight:600; }
-    .iem-table .iem-estado.iem-ok       { color:#107010; }
-    .iem-table .iem-estado.iem-revisar  { color:#a00; }
-    .iem-table tbody tr.iem-row-ok      { background:#f1faf1 !important; }
-    .iem-table tbody tr.iem-row-revisar { background:#fdecec !important; }
-    .iem-cat-filters                    { margin:14px 0; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-    .iem-cat-filters .iem-cat-label     { font-weight:600; margin-right:4px; }
-    .iem-cat-filters .iem-cat-btn       { padding:2px 12px; }
-    .iem-cat-filters .iem-cat-active    { background:#2271b1 !important; color:#fff !important; border-color:#135e96 !important; }
+/* Locales. El resto (.iem-row-*) viene de assets/css/admin.css (v3.25+). */
+.iem-table .iem-estado              { font-weight:600; }
+.iem-table .iem-estado.iem-ok       { color:#107010; }
+.iem-table .iem-estado.iem-revisar  { color:#a00; }
+.iem-cat-filters                    { margin:14px 0; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.iem-cat-filters .iem-cat-label     { font-weight:600; margin-right:4px; }
+.iem-cat-filters .iem-cat-btn       { padding:2px 12px; }
+.iem-cat-filters .iem-cat-active    { background:#2271b1 !important; color:#fff !important; border-color:#135e96 !important; }
 </style>
 <script>
 (function(){

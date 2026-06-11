@@ -47,65 +47,68 @@ $export_url = add_query_arg(array_merge([
         <div class="notice notice-error is-dismissible"><p><?php echo esc_html($flash_err); ?></p></div>
     <?php endif; ?>
 
-    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin-top:14px;">
+    <?php // ── Form de nueva merma (arriba, ancho completo, campos en fila) ── ?>
+    <div class="iem-card" style="margin-top:14px;">
+        <h2 style="margin-top:0;">Registrar nueva merma</h2>
+        <form method="post" action="<?php echo esc_url($register_url); ?>" id="iem-merma-form"
+              style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
 
-        <?php // ── Form de nueva merma ───────────────────────────────── ?>
-        <div style="flex:0 0 340px;background:#fff;padding:16px;border:1px solid #c3c4c7;border-radius:4px;">
-            <h2 style="margin-top:0;">Registrar nueva merma</h2>
-            <form method="post" action="<?php echo esc_url($register_url); ?>" id="iem-merma-form">
-                <p>
-                    <label><strong>SKU del producto:</strong>
-                        <input type="text" name="sku" id="iem-merma-sku" required autocomplete="off"
-                               style="width:100%;font-family:monospace;">
-                    </label>
-                </p>
+            <div style="flex:1 1 240px;min-width:220px;">
+                <label><strong>SKU del producto:</strong>
+                    <input type="text" name="sku" id="iem-merma-sku" required autocomplete="off"
+                           class="iem-mono" style="width:100%;">
+                </label>
                 <div id="iem-merma-sku-feedback"
-                     style="min-height:46px;margin:-6px 0 10px;padding:8px 10px;border-radius:3px;
+                     style="min-height:42px;margin:6px 0 0;padding:8px 10px;border-radius:3px;
                             font-size:12px;background:#f6f7f7;color:#666;border:1px solid #dcdcde;">
                     Ingresa un SKU para validarlo.
                 </div>
-                <p>
-                    <label><strong>Sucursal:</strong>
-                        <select name="sucursal_slug" required style="width:100%;">
-                            <option value="">— Selecciona —</option>
-                            <?php foreach ($sucursales as $slug => $name): ?>
-                                <option value="<?php echo esc_attr($slug); ?>"><?php echo esc_html($name); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                </p>
-                <p>
-                    <label><strong>Cantidad:</strong>
-                        <input type="number" name="qty" min="1" step="1" value="1" required style="width:100%;">
-                    </label>
-                </p>
-                <p>
-                    <label><strong>Tipo:</strong>
-                        <select name="tipo" required style="width:100%;">
-                            <?php foreach ($tipos as $slug => $name): ?>
-                                <option value="<?php echo esc_attr($slug); ?>"><?php echo esc_html($name); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                </p>
-                <p>
-                    <label>
-                        <input type="checkbox" name="decrement_wc" value="1">
-                        Descontar del stock de WooCommerce
-                    </label>
-                </p>
-                <p style="color:#666;font-style:italic;font-size:12px;">
-                    Si se marca, el plugin llamará a <code>wc_update_product_stock</code>
-                    para decrementar la cantidad de la variación (o producto simple).
-                    Productos variables (padre) son rechazados.
-                </p>
-                <p>
-                    <button type="submit" class="button button-primary" id="iem-merma-submit" disabled>
-                        Registrar merma
-                    </button>
-                </p>
-            </form>
-        </div>
+            </div>
+
+            <label style="flex:0 0 170px;"><strong>Sucursal:</strong>
+                <select name="sucursal_slug" required style="width:100%;">
+                    <option value="">— Selecciona —</option>
+                    <?php foreach ($sucursales as $slug => $name): ?>
+                        <option value="<?php echo esc_attr($slug); ?>"><?php echo esc_html($name); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <label style="flex:0 0 90px;"><strong>Cantidad:</strong>
+                <input type="number" name="qty" min="1" step="1" value="1" required style="width:100%;">
+            </label>
+
+            <label style="flex:0 0 150px;"><strong>Tipo:</strong>
+                <select name="tipo" required style="width:100%;">
+                    <?php foreach ($tipos as $slug => $name): ?>
+                        <option value="<?php echo esc_attr($slug); ?>"><?php echo esc_html($name); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <div style="flex:1 1 240px;min-width:200px;">
+                <label><strong>Nota / defecto encontrado:</strong>
+                    <textarea name="notes" rows="2" style="width:100%;"
+                              placeholder="Ej.: rayón en la tapa, costura abierta, falla eléctrica…"></textarea>
+                </label>
+            </div>
+
+            <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:8px;padding-top:22px;">
+                <label style="white-space:nowrap;">
+                    <input type="checkbox" name="decrement_wc" value="1">
+                    Descontar de WC
+                </label>
+                <button type="submit" class="button button-primary" id="iem-merma-submit" disabled>
+                    Registrar merma
+                </button>
+            </div>
+        </form>
+        <p class="iem-help" style="margin-bottom:0;">
+            Si se marca <strong>Descontar de WC</strong>, el plugin llamará a
+            <code>wc_update_product_stock</code> para decrementar la cantidad de la variación
+            (o producto simple). Productos variables (padre) son rechazados.
+        </p>
+    </div>
         <script>
         (function () {
             var IEM_AJAX = {
@@ -240,11 +243,12 @@ $export_url = add_query_arg(array_merge([
         })();
         </script>
 
-        <?php // ── Listado ───────────────────────────────────────────── ?>
-        <div style="flex:1 1 600px;min-width:480px;">
+        <?php // ── Listado (ancho completo) ─────────────────────────── ?>
+        <div style="margin-top:16px;">
             <form method="get" action="" style="margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                 <input type="hidden" name="post_type" value="product">
-                <input type="hidden" name="page" value="<?php echo esc_attr(IEM_Admin::PAGE_MERMAS); ?>">
+                <input type="hidden" name="page" value="<?php echo esc_attr(IEM_Admin::PAGE_SLUG); ?>">
+                <input type="hidden" name="tab" value="mermas">
 
                 <label>Sucursal:
                     <select name="f_sucursal">
@@ -278,19 +282,21 @@ $export_url = add_query_arg(array_merge([
             <?php if (empty($mermas)): ?>
                 <p>No hay mermas registradas con los filtros actuales.</p>
             <?php else: ?>
-                <table class="wp-list-table widefat fixed striped">
+                <table class="wp-list-table widefat striped">
                     <thead>
                         <tr>
-                            <th style="width:11%">Fecha</th>
-                            <th style="width:22%">Producto</th>
-                            <th style="width:10%">SKU</th>
-                            <th style="width:11%">Sucursal</th>
-                            <th style="width:5%">Cant.</th>
-                            <th style="width:9%">Costo u.</th>
-                            <th style="width:9%">Subtotal</th>
-                            <th style="width:8%">Tipo</th>
-                            <th style="width:5%">WC</th>
-                            <th style="width:10%">Estado</th>
+                            <th style="width:10%">Fecha</th>
+                            <th style="width:16%">Producto</th>
+                            <th style="width:8%">SKU</th>
+                            <th style="width:9%">Sucursal</th>
+                            <th style="width:4%">Cant.</th>
+                            <th style="width:7%">Costo u.</th>
+                            <th style="width:7%">Subtotal</th>
+                            <th style="width:7%">Tipo</th>
+                            <th>Nota / defecto</th>
+                            <th style="width:4%">WC</th>
+                            <th style="width:8%">Estado</th>
+                            <th style="width:4%">Kardex</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -335,11 +341,18 @@ $export_url = add_query_arg(array_merge([
                                 <?php echo $subtotal !== null ? number_format($subtotal, 2, '.', ',') : '<span style="color:#bbb;">—</span>'; ?>
                             </td>
                             <td><?php echo esc_html($tipos[$m['tipo']] ?? $m['tipo']); ?></td>
+                            <td class="iem-merma-note-cell" data-id="<?php echo (int) $m['id']; ?>">
+                                <span class="iem-merma-note-text<?php echo trim((string) ($m['notes'] ?? '')) === '' ? ' iem-help' : ''; ?>"><?php
+                                    $note_txt = trim((string) ($m['notes'] ?? ''));
+                                    echo $note_txt !== '' ? esc_html($note_txt) : '— sin nota —';
+                                ?></span>
+                                <a href="#" class="iem-merma-note-edit" style="margin-left:6px;font-size:11px;">✏️ editar</a>
+                            </td>
                             <td>
                                 <?php if (!empty($m['decremented_wc'])): ?>
-                                    <span style="color:#107010;font-weight:600;">Sí</span>
+                                    <span class="iem-status-ok">Sí</span>
                                 <?php else: ?>
-                                    <span style="color:#888;">No</span>
+                                    <span class="iem-status-muted">No</span>
                                 <?php endif; ?>
                             </td>
                             <td>
@@ -357,6 +370,14 @@ $export_url = add_query_arg(array_merge([
                                     </a>
                                 <?php endif; ?>
                             </td>
+                            <td>
+                                <?php
+                                $kx_url = IEM_Admin::tab_url('kardex', ['item_id' => (int) $m['item_id']]);
+                                ?>
+                                <a href="<?php echo esc_url($kx_url); ?>"
+                                   class="button button-small"
+                                   title="Ver kardex de este ítem">📊</a>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
@@ -370,7 +391,7 @@ $export_url = add_query_arg(array_merge([
                                     Bs. <?php echo number_format($total_cost_all, 2, '.', ','); ?>
                                 </span>
                             </td>
-                            <td colspan="3" style="text-align:right;color:#666;font-weight:400;font-size:12px;">
+                            <td colspan="5" style="text-align:right;color:#666;font-weight:400;font-size:12px;">
                                 Solo activas (sin retornadas):
                                 <strong style="color:#a00;">Bs. <?php echo number_format($total_cost_act, 2, '.', ','); ?></strong>
                             </td>
@@ -379,5 +400,88 @@ $export_url = add_query_arg(array_merge([
                 </table>
             <?php endif; ?>
         </div>
-    </div>
+
+    <?php // ── Edición inline de la nota/defecto por merma ───────────────── ?>
+    <script>
+    (function () {
+        var AJAX = {
+            url:   <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>,
+            nonce: <?php echo wp_json_encode($ajax_nonce); ?>,
+            field: <?php echo wp_json_encode(IEM_Ajax::NONCE_FIELD); ?>
+        };
+        function esc(s) {
+            return String(s).replace(/[&<>"']/g, function (c) {
+                return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+            });
+        }
+        document.addEventListener('click', function (e) {
+            var editLink = e.target.closest('.iem-merma-note-edit');
+            if (editLink) {
+                e.preventDefault();
+                var cell = editLink.closest('.iem-merma-note-cell');
+                if (!cell || cell.querySelector('textarea')) return; // ya editando
+                var span    = cell.querySelector('.iem-merma-note-text');
+                var current = (span && !span.classList.contains('iem-help')) ? span.textContent : '';
+                cell.dataset.prev = cell.innerHTML;
+                cell.innerHTML =
+                    '<textarea class="iem-merma-note-input" rows="2" style="width:100%;">' + esc(current) + '</textarea>' +
+                    '<div style="margin-top:4px;">' +
+                    '<button type="button" class="button button-small iem-merma-note-save">Guardar</button> ' +
+                    '<a href="#" class="iem-merma-note-cancel" style="font-size:11px;">cancelar</a>' +
+                    '<span class="iem-merma-note-msg" style="margin-left:8px;font-size:11px;color:#a00;"></span>' +
+                    '</div>';
+                var ta = cell.querySelector('textarea');
+                ta.focus();
+                return;
+            }
+            var cancelLink = e.target.closest('.iem-merma-note-cancel');
+            if (cancelLink) {
+                e.preventDefault();
+                var c1 = cancelLink.closest('.iem-merma-note-cell');
+                if (c1 && typeof c1.dataset.prev !== 'undefined') c1.innerHTML = c1.dataset.prev;
+                return;
+            }
+            var saveBtn = e.target.closest('.iem-merma-note-save');
+            if (saveBtn) {
+                e.preventDefault();
+                var cell2 = saveBtn.closest('.iem-merma-note-cell');
+                var id    = cell2 ? (cell2.dataset.id || 0) : 0;
+                var ta2   = cell2 ? cell2.querySelector('textarea') : null;
+                var msg   = cell2 ? cell2.querySelector('.iem-merma-note-msg') : null;
+                if (!cell2 || !ta2) return;
+                var val = ta2.value;
+                saveBtn.disabled = true;
+                var body = new URLSearchParams();
+                body.append('action', 'iem_update_merma_notes');
+                body.append(AJAX.field, AJAX.nonce);
+                body.append('merma_id', id);
+                body.append('notes', val);
+                fetch(AJAX.url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body.toString()
+                })
+                .then(function (r) { return r.json(); })
+                .then(function (json) {
+                    if (json && json.success) {
+                        var txt = (json.data && typeof json.data.notes !== 'undefined') ? json.data.notes : val;
+                        var empty = txt.trim() === '';
+                        cell2.innerHTML =
+                            '<span class="iem-merma-note-text' + (empty ? ' iem-help' : '') + '">' +
+                            esc(empty ? '— sin nota —' : txt) + '</span>' +
+                            '<a href="#" class="iem-merma-note-edit" style="margin-left:6px;font-size:11px;">✏️ editar</a>';
+                    } else {
+                        if (msg) msg.textContent = (json && json.data && json.data.message) || 'Error al guardar.';
+                        saveBtn.disabled = false;
+                    }
+                })
+                .catch(function () {
+                    if (msg) msg.textContent = 'Error de conexión.';
+                    saveBtn.disabled = false;
+                });
+            }
+        });
+    })();
+    </script>
 </div>
