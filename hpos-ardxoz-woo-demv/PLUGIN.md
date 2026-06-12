@@ -1,7 +1,7 @@
 # HPOS Ardxoz Woo DEMV
 
 - **Slug:** `hpos-ardxoz-woo-demv`
-- **Versión:** 3.15
+- **Versión:** 3.17
 - **Autor:** Ardxoz
 - **Requiere:** WooCommerce (HPOS habilitado)
 - **Prefijos:** clases `HPOS_Ardxoz_Woo_DEMV_*` · constantes `HAWD_*` · metas `_hpos_ardxoz_woo_*` · opciones/transients `hawd_*`
@@ -64,7 +64,7 @@ consulta como fallback. **Solo las marcadas con ✓ tienen mapeo legacy**; el re
 | `_hpos_ardxoz_woo_numero_guia` | `numero_guia` ✓ | Nº de guía (alterno). |
 | `_hpos_ardxoz_woo_fecha_pago_envio` | — | Fecha en que se pagó al courier. Una vez seteado **bloquea** la edición del costo de envío. |
 | `_hpos_ardxoz_woo_checkbox_arqueo` | — | `'1'` si la revisión de arqueo está confirmada (one-way: no se puede desmarcar desde la tabla). |
-| `_hpos_ardxoz_woo_monto_efectivo` | — | Monto en efectivo que entra a la caja del vendedor (`Caja::META_KEY`). Es el ingreso que aparece en el ledger de Caja Efectivo. |
+| `_hpos_ardxoz_woo_monto_efectivo` | — | Monto en efectivo que entra a la caja del vendedor (`Caja::META_KEY`). Es el ingreso que aparece en el ledger de Caja Efectivo. **Se descuenta del importe a depositar al banco** (`Calculator::pending_amount`) y **bloquea la completación** desde el flujo de depósito (regla 24). |
 
 ## Meta keys del usuario
 
@@ -129,6 +129,9 @@ está declarado como constante pero **no se usa actualmente** como capability fo
 - `woocommerce_new_order` / `woocommerce_after_order_object_save` / `woocommerce_delete_order` / `woocommerce_trash_order` → invalidación de caches
 - `woocommerce_checkout_order_created` → autofill de postcode
 
+**Action que dispara (para integraciones):**
+- `hawd_deposit_registered` (`$order_id`, `$order`) → se dispara tras guardar un depósito (`_hpos_ardxoz_woo_monto_deposito`) en **Express** (`Depositos_Express::ajax_complete`), **Admin** (`Ajax::complete_deposit`) y **Caja** (`Caja::handle_aprobar`). Permite que el plugin de **Finanzas** ingrese el delta del depósito a la cuenta en el momento del depósito (no al completar) — esencial para que la caja no quede descuadrada en pedidos con efectivo que se completan después.
+
 **Filters:**
 - `woocommerce_orders_table_query_clauses` → search por postcode en pantalla nativa de pedidos
 
@@ -178,6 +181,7 @@ está declarado como constante pero **no se usa actualmente** como capability fo
 21. **Re-completado de pedidos legacy** — Los gates "ya tiene depósito" en `Ajax::complete_deposit`, `Depositos_Express::ajax_search` y `Depositos_Express::ajax_complete` usan **`Meta::get_hpos_only()`** (sin fallback legacy). Un pedido que solo tiene metas ACF (`numero_de_BANCARIO`, `IMPORTE_DEPOSITADO`, `F_deposito_bancario`) se considera **no migrado** y aparece como re-completable. Al completarlo se escriben las metas HPOS nuevas; **las legacy se conservan como backup** (no se borran). El filtro "Sin Depósito" (`no_deposit` en `Query`) sigue usando `Meta::get` con fallback legacy → un pedido legacy NO aparece como "sin depósito".
 22. **Top-up de absorber rezagado** — Cuando un pedido absorbió un faltante (`Calculator::plan_deposit_distribution` con `diff < 0`) queda con depósito previo pero status no terminal. En la siguiente tanda — sea desde Admin (`Ajax::complete_deposit`) o desde Express (`ajax_search`/`ajax_complete`) — esos pedidos pasan el gate como **top-up**: `Calculator::get_topup_info()` devuelve el faltante restante (`calc − monto_prev`), `Calculator::pending_amount()` lo usa como esperado en `plan_deposit_distribution` vía el parámetro `$esperado_override`. Al aplicar: **comprobante** se concatena con `-` (idempotencia estilo Caja, regla 11), **monto_deposito** se suma al previo, **fecha_deposito** se sobrescribe con la nueva. Si el acumulado cubre el calculado el pedido pasa a `completed`; si no, sigue como absorber para una futura tanda. La regla **excluye** estados terminales (`completed`, `cancelled`, `refunded`, `failed`). En Express las filas top-up se marcan con badge azul y muestran el depósito previo en la columna "A depositar"; `descuento_ibex` se reporta como 0 porque la retención IBEX ya se aplicó en el depósito original.
 23. **Recuadros de estadísticas (`Query::compute_stats`)** — 5 tiles en la cabecera de Depósitos: **Total Depositado** (Σ `monto_deposito`), **Total** (Σ `total_amount`), **Total Costo de Envío** (Σ `costo_envio`; el sub-texto lo rellena la caja de Traspasos vía evento `hawd:stats-rendered`, oculto con `.hawd-stat-sub:empty` si Traspasos no está cargado), **7% IBEX no depositado** (delega a `Calculator::sum_ibex_cod_retention`; sub-texto descriptivo "Retención de envío IBEX y pago Pago Contra Entrega · N pedidos"), y **Diferencia**. La **Diferencia** se calcula como `monto_deposito − esperado` donde `esperado` aplica el 7% en IBEX-COD (mismo criterio que `Calculator::calcular`, vía `is_ibex_cod`) — así la retención IBEX **no** aparece como faltante falso. Los **absorbers en curso** (depósito previo + estado no terminal + faltante) se **excluyen** del breakdown por método y se reportan aparte en `pending_topup_total`/`pending_topup_count` (línea azul "Top-ups en curso"). Cache 5 min con key que incluye `HAWD_VERSION` → un bump de versión la invalida sola.
+24. **Pago mitad efectivo / mitad QR** — Si el pedido tiene `_hpos_ardxoz_woo_monto_efectivo > 0`, ese dinero ya se cobró y se concilia por **Caja Efectivo**, NO por el depósito bancario. Punto único: `Calculator::cash_amount()` / `has_cash_payment()`. Consecuencias en el flujo de depósito (tanto Admin `Ajax::complete_deposit` como **Express** `Depositos_Express::ajax_complete`, vía `plan_deposit_distribution`): (a) el **esperado a depositar** = `calcular() − efectivo` (`pending_amount` lo refleja → modal, columna "A depositar", sumarios); (b) el pedido **NO se marca `completed`** aquí (`complete = false`, flag `is_cash` en el plan) — su cierre lo decide la aprobación de Caja por umbral (regla 13). Así se evita **duplicar el pago** (antes Express esperaba el total completo e ignoraba el efectivo). La detección de **retención IBEX** en Express usa la regla explícita `is_ibex_cod`, no el delta `total − calculado`, porque ese delta ahora también incluye el efectivo. Nota de pedido: "Depósito bancario parcial". **El faltante de top-up también es del lado banco** (`get_topup_info` = `(calcular − efectivo) − depósito_previo`): sin esto, tras el depósito parcial QR el pedido reentraba a Express/Admin como top-up y se depositaba la parte de efectivo otra vez (doble pago). El descuento del efectivo se aplica **una sola vez** por ruta: en el caso normal en `pending_amount`/`plan_deposit_distribution`; en top-up ya viene descontado en el faltante (no se vuelve a restar). Una vez cubierta la parte banco, el pedido se **omite** del flujo de depósito (gate `get_topup_info` → null) hasta que Caja pliegue el efectivo y lo complete.
 
 ## Issues conocidos / deuda técnica
 

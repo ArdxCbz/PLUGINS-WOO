@@ -92,7 +92,9 @@
 #hawd_dx_table tr.hawd-dx-row-ibex td { background: #fff8ec; }
 #hawd_dx_table tr.hawd-dx-row-topup td { background: #eef6ff; }
 #hawd_dx_table tr.hawd-dx-row-topup.hawd-dx-row-ibex td { background: #f3f0e6; }
-.hawd-dx-badge-topup { background: #1f7adb !important; }
+#hawd_dx_table tr.hawd-dx-row-cash td { background: #f4effb; }
+.hawd-dx-badge-topup { background: #1f7adb !important; color: #fff; }
+.hawd-dx-badge-cash  { background: #7c3aed !important; color: #fff; border-color: #6d28d9; }
 .hawd-dx-badge {
     display: inline-block;
     font-size: 9px;

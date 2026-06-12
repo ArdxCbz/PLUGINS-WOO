@@ -537,6 +537,8 @@ class HPOS_Ardxoz_Woo_DEMV_Query
             'is_top_up'              => $is_top_up,
             'prior_monto_deposito'   => $is_top_up ? $topup_info['prior_monto'] : 0.0,
             'prior_numero_deposito'  => $is_top_up ? $topup_info['prior_num']   : '',
+            'monto_efectivo'         => HPOS_Ardxoz_Woo_DEMV_Calculator::cash_amount($order),
+            'has_cash'               => HPOS_Ardxoz_Woo_DEMV_Calculator::has_cash_payment($order),
             'edit_url'               => $order->get_edit_order_url(),
         );
     }

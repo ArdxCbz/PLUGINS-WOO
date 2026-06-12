@@ -88,6 +88,7 @@
             var classes = [];
             if (r.aplica_ibex) classes.push('hawd-dx-row-ibex');
             if (r.is_top_up)   classes.push('hawd-dx-row-topup');
+            if (r.has_cash)    classes.push('hawd-dx-row-cash');
             var rowCls = classes.join(' ');
 
             var amountCell;
@@ -110,14 +111,23 @@
                 amountCell = '<span class="hawd-dx-amount-final">' + fmt(r.importe_calculado) + '</span>';
             }
 
+            // Pedido mitad efectivo / mitad QR: el efectivo NO se deposita al
+            // banco (se concilia por Caja) y el pedido no se completa aquí.
+            if (r.has_cash) {
+                amountCell +=
+                    '<span class="hawd-dx-discount-line">Efectivo en caja: ' +
+                    fmt(r.monto_efectivo) + ' (no se deposita)</span>';
+            }
+
             var ibexBadge  = r.aplica_ibex ? ' <span class="hawd-dx-badge">−7% IBEX</span>' : '';
             var topupBadge = r.is_top_up   ? ' <span class="hawd-dx-badge hawd-dx-badge-topup">Top-up</span>' : '';
+            var cashBadge  = r.has_cash    ? ' <span class="hawd-dx-badge hawd-dx-badge-cash">Efectivo</span>' : '';
 
             var tr =
                 '<tr class="' + rowCls + '">' +
                   '<td style="text-align:center"><input type="checkbox" class="hawd-dx-row-check" ' +
                     'data-id="' + r.id + '" data-monto="' + r.importe_calculado + '" checked /></td>' +
-                  '<td><a href="' + r.edit_url + '" target="_blank">#' + escapeHtml(r.order_number) + '</a>' + topupBadge + '</td>' +
+                  '<td><a href="' + r.edit_url + '" target="_blank">#' + escapeHtml(r.order_number) + '</a>' + topupBadge + cashBadge + '</td>' +
                   '<td>' + escapeHtml(r.guia || '—') + '</td>' +
                   '<td>' + escapeHtml(r.date) + '</td>' +
                   '<td>' + escapeHtml(r.shipping_method_title || '—') + ibexBadge + '</td>' +
@@ -309,6 +319,7 @@
                     var line = '#' + (r.number || r.id) + ' — ' + r.status;
                     if (r.reason)  line += ' (' + r.reason + ')';
                     if (r.importe) line += ' · ' + fmt(r.importe);
+                    if (r.is_cash) line += ' · efectivo en caja, no completado';
                     return '<li>' + escapeHtml(line) + '</li>';
                 }).join('') +
                 '</ul>';

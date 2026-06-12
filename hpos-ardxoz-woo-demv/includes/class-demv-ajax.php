@@ -201,6 +201,8 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
             $is_abs   = (bool) $entry['is_absorber'];
             $diff     = (float) $entry['diff'];
             $esperado = (float) $entry['esperado'];
+            $is_cash  = (bool) ($entry['is_cash'] ?? false);
+            $cash     = $is_cash ? HPOS_Ardxoz_Woo_DEMV_Calculator::cash_amount($order) : 0.0;
             $topup    = $topup_info_map[$oid] ?? null;
 
             try {
@@ -226,6 +228,11 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
                 }
                 $order->save();
 
+                // Depósito registrado: avisa a integraciones (p.ej. Finanzas
+                // ingresa el delta a la cuenta en el momento del depósito, no al
+                // completar — clave en pedidos con efectivo que cierran después).
+                do_action('hawd_deposit_registered', $order->get_id(), $order);
+
                 if ($topup) {
                     $monto_final = round($topup['prior_monto'] + $monto, 2);
                     $nota = sprintf(
@@ -238,6 +245,16 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
                         number_format($monto_final, 2, ',', '.'),
                         number_format($topup['calc'], 2, ',', '.'),
                         $complete ? 'Pedido completado.' : 'Pedido sigue sin completar.'
+                    );
+                } elseif ($is_cash) {
+                    // Pedido mitad efectivo / mitad QR: solo se deposita la parte
+                    // bancaria. NO se completa aquí; se cierra al aprobar el
+                    // efectivo en Caja Efectivo (umbral monto_deposito >= total).
+                    $nota = sprintf(
+                        "Depósito bancario parcial:\nFecha: %s\nComprobante: %s\nDepositado al banco: %s Bs\nPagado en efectivo (Caja): %s Bs\nEl pedido NO se completa aquí: se cerrará al aprobar el efectivo en Caja.",
+                        $fecha, $comprobante,
+                        number_format($monto, 2, ',', '.'),
+                        number_format($cash, 2, ',', '.')
                     );
                 } elseif ($is_abs && $diff < 0) {
                     $nota = sprintf(

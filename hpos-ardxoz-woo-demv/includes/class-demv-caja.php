@@ -257,6 +257,10 @@ class HPOS_Ardxoz_Woo_DEMV_Caja
                 continue;
             }
 
+            // Depósito (efectivo plegado) registrado: avisa a integraciones para
+            // que ingresen el delta a la cuenta en el momento del depósito.
+            do_action('hawd_deposit_registered', $order->get_id(), $order);
+
             $nota = sprintf(
                 "Retiro aprobado:\nFecha depósito: %s\nNº depósito: %s\nMonto efectivo aplicado: %s Bs\nTotal depósito acumulado: %s Bs",
                 $fecha,

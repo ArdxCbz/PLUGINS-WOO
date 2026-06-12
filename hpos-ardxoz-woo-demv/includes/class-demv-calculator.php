@@ -109,6 +109,31 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
     }
 
     /**
+     * Monto pagado en efectivo por el cliente. Ese dinero entra a la Caja
+     * Efectivo del vendedor (`_hpos_ardxoz_woo_monto_efectivo`) y se concilia
+     * por el flujo de Caja, NO por el depósito bancario. Es la **única fuente**
+     * para descontarlo del importe a depositar al banco y evitar duplicar el
+     * pago (mitad efectivo + mitad QR).
+     *
+     * @return float
+     */
+    public static function cash_amount($order)
+    {
+        return round((float) $order->get_meta('_hpos_ardxoz_woo_monto_efectivo'), 2);
+    }
+
+    /**
+     * True si el pedido tiene un monto pagado en efectivo (> 0). Estos pedidos
+     * NO deben completarse desde el flujo de depósito bancario: su cierre lo
+     * decide la aprobación de Caja Efectivo (`Caja::handle_aprobar`, umbral
+     * `monto_deposito >= total`).
+     */
+    public static function has_cash_payment($order)
+    {
+        return self::cash_amount($order) > 0.01;
+    }
+
+    /**
      * Información de top-up (depósito complementario) si el pedido es un
      * absorber-rezagado: tiene depósito HPOS registrado, está en un estado
      * no terminal y aún le falta dinero respecto al calculado.
@@ -134,8 +159,12 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
         }
 
         $prior_monto = (float) HPOS_Ardxoz_Woo_DEMV_Meta::get_hpos_only($order, '_hpos_ardxoz_woo_monto_deposito');
-        $calc        = self::calcular($order);
-        $faltante    = round(max(0.0, $calc - $prior_monto), 2);
+        // Lado banco: el efectivo se concilia por Caja, NUNCA se deposita al banco.
+        // El faltante a depositar es (calcular − efectivo) − lo ya depositado. Sin
+        // esto, un pedido mitad efectivo/QR reentra como top-up y se vuelve a
+        // depositar la parte de efectivo (doble pago).
+        $calc_bank   = round(max(0.0, self::calcular($order) - self::cash_amount($order)), 2);
+        $faltante    = round(max(0.0, $calc_bank - $prior_monto), 2);
         if ($faltante <= 0.01) {
             return null;
         }
@@ -144,22 +173,27 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
             'prior_num'   => $num,
             'prior_monto' => round($prior_monto, 2),
             'faltante'    => $faltante,
-            'calc'        => round($calc, 2),
+            'calc'        => $calc_bank,
         );
     }
 
     /**
-     * Monto que aún se debe depositar para el pedido:
-     *   - Top-up (absorber rezagado): faltante respecto al calculado.
-     *   - Caso normal: calcular() completo.
+     * Monto que aún se debe depositar AL BANCO para el pedido:
+     *   - Top-up (absorber rezagado): faltante (ya del lado banco, con el efectivo
+     *     descontado en get_topup_info).
+     *   - Caso normal: (calcular − efectivo).
      *
-     * Sirve como single source para que la UI y los handlers concuerden
-     * en cuánto debe entrar al modal de depósito.
+     * El efectivo ya cobrado se concilia por Caja Efectivo, nunca al banco. Sirve
+     * como single source para que la UI y los handlers concuerden en cuánto debe
+     * entrar al modal de depósito.
      */
     public static function pending_amount($order)
     {
         $info = self::get_topup_info($order);
-        return $info ? $info['faltante'] : self::calcular($order);
+        if ($info) {
+            return $info['faltante']; // ya es lado banco (efectivo descontado)
+        }
+        return round(max(0.0, self::calcular($order) - self::cash_amount($order)), 2);
     }
 
     /**
@@ -177,6 +211,11 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
      *    y NO queda completado. El resto recibe su esperado y queda completed.
      *  - diff > 0 (excedente): el pedido $absorber recibe (esperado + diff)
      *    y queda completed. El resto también queda completed.
+     *
+     * Efectivo: el esperado por pedido descuenta el `monto_efectivo` (ya cobrado
+     * y conciliado por Caja Efectivo). Además, todo pedido con efectivo > 0
+     * queda con `complete = false` (su cierre lo decide la aprobación de Caja),
+     * y el plan lo marca con `is_cash = true`.
      *
      * Si solo hay un pedido y |diff| > 0.01, el absorber se asigna automáticamente.
      *
@@ -203,14 +242,22 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
             return new \WP_Error('hawd_no_orders', 'No hay pedidos para distribuir.');
         }
 
-        $importes = array();
-        $esperado = 0.0;
+        $importes   = array();
+        $cash_flags = array();
+        $esperado   = 0.0;
         foreach ($orders as $o) {
             $oid = (int) $o->get_id();
-            $imp = array_key_exists($oid, $esperado_override)
-                ? (float) $esperado_override[$oid]
-                : self::calcular($o);
-            $importes[$oid] = $imp;
+            if (array_key_exists($oid, $esperado_override)) {
+                // El override (faltante de top-up) YA viene del lado banco, con el
+                // efectivo descontado en get_topup_info: no se vuelve a restar.
+                $imp = round(max(0.0, (float) $esperado_override[$oid]), 2);
+            } else {
+                // Caso normal: el efectivo ya cobrado se concilia por Caja, se
+                // descuenta del importe a depositar al banco (no duplicar el pago).
+                $imp = round(max(0.0, self::calcular($o) - self::cash_amount($o)), 2);
+            }
+            $importes[$oid]   = $imp;
+            $cash_flags[$oid] = self::has_cash_payment($o);
             $esperado += $imp;
         }
         $monto_real = (float) $monto_real;
@@ -270,6 +317,14 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
                     'esperado'    => round($base, 2),
                     'diff'        => 0.0,
                 );
+            }
+
+            // Pedido con pago en efectivo: el depósito bancario solo cubre la
+            // parte QR. NO se completa aquí; el cierre lo decide la aprobación
+            // de Caja Efectivo (umbral monto_deposito >= total).
+            $plan[$oid]['is_cash'] = ! empty($cash_flags[$oid]);
+            if ($plan[$oid]['is_cash']) {
+                $plan[$oid]['complete'] = false;
             }
         }
 

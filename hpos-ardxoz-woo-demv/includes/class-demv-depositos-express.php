@@ -243,17 +243,27 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
             $row   = HPOS_Ardxoz_Woo_DEMV_Query::build_row_data($order);
 
             $total      = (float) $row['order_total'];
-            $calculado  = (float) $row['importe_calculado']; // pending_amount (faltante en top-ups)
+            $calculado  = (float) $row['importe_calculado']; // a depositar (IBEX y efectivo ya descontados)
             $is_top_up  = (bool) $row['is_top_up'];
+            $cash       = (float) $row['monto_efectivo'];
+            $has_cash   = (bool) $row['has_cash'];
 
-            // En top-ups la retención IBEX ya se aplicó en el depósito original:
-            // el "calculado" actual es el faltante puro, no entra descuento nuevo.
+            // La retención IBEX (7%) es independiente del efectivo. Se detecta
+            // por la regla explícita `is_ibex_cod`, NO infiriendo desde
+            // (total − calculado), porque ese delta ahora también incluye el
+            // efectivo descontado y produciría un falso "−7% IBEX".
             if ($is_top_up) {
+                // En top-ups la retención IBEX ya se aplicó en el depósito original.
                 $descuento   = 0.0;
                 $aplica_ibex = false;
             } else {
-                $descuento   = max(0.0, $total - $calculado);
-                $aplica_ibex = ($descuento > 0.001);
+                $aplica_ibex = HPOS_Ardxoz_Woo_DEMV_Calculator::is_ibex_cod(
+                    $row['shipping_method_title'],
+                    $row['payment_method_title']
+                );
+                $descuento   = $aplica_ibex
+                    ? round($total * HPOS_Ardxoz_Woo_DEMV_Calculator::FEE_IBEX_COD, 2)
+                    : 0.0;
             }
 
             $rows[] = [
@@ -268,6 +278,8 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
                 'importe_calculado'     => $calculado,
                 'descuento_ibex'        => round($descuento, 2),
                 'aplica_ibex'           => $aplica_ibex,
+                'monto_efectivo'        => round($cash, 2),
+                'has_cash'              => $has_cash,
                 'is_top_up'             => $is_top_up,
                 'prior_monto_deposito'  => (float) $row['prior_monto_deposito'],
                 'prior_numero_deposito' => (string) $row['prior_numero_deposito'],
@@ -377,6 +389,8 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
             $is_abs   = (bool) $entry['is_absorber'];
             $diff     = (float) $entry['diff'];
             $esperado = (float) $entry['esperado'];
+            $is_cash  = (bool) ($entry['is_cash'] ?? false);
+            $cash     = $is_cash ? HPOS_Ardxoz_Woo_DEMV_Calculator::cash_amount($order) : 0.0;
             $topup    = $topup_info_map[$oid] ?? null;
 
             try {
@@ -401,6 +415,11 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
                 }
                 $order->save();
 
+                // Depósito registrado: avisa a integraciones (p.ej. Finanzas
+                // ingresa el delta a la cuenta en el momento del depósito, no al
+                // completar — clave en pedidos con efectivo que cierran después).
+                do_action('hawd_deposit_registered', $order->get_id(), $order);
+
                 if ($topup) {
                     $monto_final = round($topup['prior_monto'] + $monto, 2);
                     $nota = sprintf(
@@ -413,6 +432,16 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
                         number_format($monto_final, 2, ',', '.'),
                         number_format($topup['calc'], 2, ',', '.'),
                         $complete ? 'Pedido completado.' : 'Pedido sigue sin completar.'
+                    );
+                } elseif ($is_cash) {
+                    // Pedido mitad efectivo / mitad QR: solo se deposita la parte
+                    // bancaria. NO se completa aquí; se cierra al aprobar el
+                    // efectivo en Caja Efectivo (umbral monto_deposito >= total).
+                    $nota = sprintf(
+                        "Depósito bancario parcial (Express):\nFecha: %s\nComprobante: %s\nDepositado al banco: %s Bs\nPagado en efectivo (Caja): %s Bs\nEl pedido NO se completa aquí: se cerrará al aprobar el efectivo en Caja.",
+                        $fecha, $comprobante,
+                        number_format($monto, 2, ',', '.'),
+                        number_format($cash, 2, ',', '.')
                     );
                 } elseif ($is_abs && $diff < 0) {
                     $nota = sprintf(
@@ -447,6 +476,7 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
                     'importe'     => $monto,
                     'is_absorber' => $is_abs,
                     'is_top_up'   => (bool) $topup,
+                    'is_cash'     => $is_cash,
                     'completed'   => $complete,
                 ];
                 $processed++;
