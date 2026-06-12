@@ -13,7 +13,16 @@ de resultados).
 - **Moneda:** Bolivianos (Bs/BOB), única. Helper global `fin_money()`.
 - **Dependencia:** WooCommerce activo (gate en `plugins_loaded`). **Opcionales (guardadas por `class_exists`):** plugin de Inventario (CMV desde el Kardex) y plugin **DEMV** (retención IBEX 7% en el Estado de Resultados, y resolución de la **sucursal** de cada pedido para dividir el pago IBEX — `get_orders_taxonomies()`/`SUCURSALES`); si faltan, esos valores se muestran en 0 y el pago IBEX cae al bucket `SIN SUCURSAL`.
 
-> Estado: **v2.10 — en desarrollo.** Grupos contables + Motivos + CMV desde el
+> Estado: **v2.12 — en desarrollo.** (2.12: `posted_amount_for_ref()` ahora cuenta
+> solo los movimientos **vigentes** —excluye anulados (`reversed_at`) y contrasientos
+> (`reverses_id`)—; así, **anular** un ingreso de depósito baja el neto vigente y la
+> reconciliación vuelve a registrar el delta en el siguiente depósito/completado, en
+> vez de quedar "trabada" porque el contrasiento no copia el `ref_id`.) (2.11: el **ingreso por depósito** se reconoce
+> ahora **al registrar el depósito** —action DEMV `hawd_deposit_registered` desde
+> Express/Admin/Caja— mediante **reconciliación incremental** del delta y datado por
+> la **fecha real del depósito**, en lugar de un único ingreso al completar; así la
+> caja no queda descuadrada con el banco mientras el pedido sigue pendiente, y los
+> pedidos mitad efectivo/QR ingresan cada parte cuando el dinero llega.) Grupos contables + Motivos + CMV desde el
 > Kardex y automatizaciones por pedido. La UI se sigue puliendo (1.2: listado de
 > movimientos reubicado debajo de los formularios; 1.3: Configuración
 > normalizada en dos secciones — Automatizaciones en grid + Motivos; 1.4: badges
@@ -80,7 +89,7 @@ Define el helper global `fin_money($amount)`.
 | `FIN_Groups` | `class-fin-groups.php` | Catálogo FIJO de grupos contables (comportamiento P&L horneado). `all()`, `selectable($nature)`, `affects_result()`. |
 | `FIN_Categories` | `class-fin-categories.php` | CRUD motivos (`nature` + `group_key` + `requires_description`). `active_list($nature)`. |
 | `FIN_Movements` | `class-fin-movements.php` | Ledger. `register()`, `register_opening()`, `transfer()`, `reverse()`, `query()`, `exists_for_ref()`. |
-| `FIN_Orders` | `class-fin-orders.php` | Depósito → ingreso automático al completar (idempotente). Costo de envío courier → egreso MANUAL por día (un egreso por pedido), métodos configurables. **2.4+: pago de envío IBEX → egreso MANUAL por MES.** **2.9+ (dividido por sucursal):** `ibex_month_orders()` agrupa los pedidos IBEX por mes **y por sucursal**; `register_ibex_sucursal('Y-m', $sucursal)` registra **un egreso por sucursal** = total de esa sucursal en el mes (ref `order_shipping_ibex`, `ref_id`=AAAAMM·índice, fecha = fin de mes, idempotente por mes·sucursal). Sucursales vía `ibex_sucursales()` (lee `HPOS_Ardxoz_Woo_DEMV_Config::SUCURSALES`, fallback `COCHABAMBA`/`SANTA CRUZ`); categoría por sucursal vía `ibex_categories()` (opción `OPT_IBEX_CATEGORIES` = mapa `[SUCURSAL=>cat_id]`) con `ibex_category_for()` cayendo a la categoría única legado (`OPT_IBEX_CATEGORY`) si no hay mapeo. La sucursal de cada pedido se resuelve en bloque con `order_sucursal_map()` → `HPOS_Ardxoz_Woo_DEMV_Query::get_orders_taxonomies()` (atributo `pa_sucursal`); pedidos sin sucursal → bucket `SIN SUCURSAL`. Meses validados con el esquema previo (`ref_id`=AAAAMM) se detectan como **legado** y se muestran bloqueados. Resto de config `OPT_IBEX_*` (cuenta/métodos default `IBEX`, corte `OPT_IBEX_HIDE_BEFORE`). |
+| `FIN_Orders` | `class-fin-orders.php` | Depósito → ingreso **al registrar el depósito** (action DEMV `hawd_deposit_registered`; red de seguridad al completar), por **reconciliación incremental** del delta (`reconcile_deposit_income`), datado por la fecha real del depósito. Costo de envío courier → egreso MANUAL por día (un egreso por pedido), métodos configurables. **2.4+: pago de envío IBEX → egreso MANUAL por MES.** **2.9+ (dividido por sucursal):** `ibex_month_orders()` agrupa los pedidos IBEX por mes **y por sucursal**; `register_ibex_sucursal('Y-m', $sucursal)` registra **un egreso por sucursal** = total de esa sucursal en el mes (ref `order_shipping_ibex`, `ref_id`=AAAAMM·índice, fecha = fin de mes, idempotente por mes·sucursal). Sucursales vía `ibex_sucursales()` (lee `HPOS_Ardxoz_Woo_DEMV_Config::SUCURSALES`, fallback `COCHABAMBA`/`SANTA CRUZ`); categoría por sucursal vía `ibex_categories()` (opción `OPT_IBEX_CATEGORIES` = mapa `[SUCURSAL=>cat_id]`) con `ibex_category_for()` cayendo a la categoría única legado (`OPT_IBEX_CATEGORY`) si no hay mapeo. La sucursal de cada pedido se resuelve en bloque con `order_sucursal_map()` → `HPOS_Ardxoz_Woo_DEMV_Query::get_orders_taxonomies()` (atributo `pa_sucursal`); pedidos sin sucursal → bucket `SIN SUCURSAL`. Meses validados con el esquema previo (`ref_id`=AAAAMM) se detectan como **legado** y se muestran bloqueados. Resto de config `OPT_IBEX_*` (cuenta/métodos default `IBEX`, corte `OPT_IBEX_HIDE_BEFORE`). |
 | `FIN_Reports` | `class-fin-reports.php` | `cash_flow()`, `expenses_by_category()`, `income_statement()`, `sales_from_orders()` (ventas devengadas desde pedidos; **descompone** Ventas brutas = Σ subtotal de productos, Descuentos, Venta neta = bruta − desc, y Envío cobrado como línea aparte; Cobrado/Por cobrar es memo de la Venta neta). **2.3+ (separado por moneda):** `cash_flow()`/`expenses_by_category()` devuelven `[code => rows]`; `income_statement()` es en Bs (filtra ledger a base) y agrega `other_currencies` (ingresos/egresos del ledger en otras monedas, informativo). **2.4+:** `ibex_retention($from,$to)` = retención del 7% no depositada (pedidos IBEX + Contra Entrega del período) reutilizando `HPOS_Ardxoz_Woo_DEMV_Calculator::sum_ibex_cod_retention()`; entra como **gasto operativo real** (suma a `total_gastos`, reduce la utilidad neta). |
 | `FIN_Inventory_Costs` | `class-fin-inventory-costs.php` | **Fachada para el plugin de Inventario (costos de importación).** `register($account_id,$amount,$desc,$ref_id,$ref_code)` → egreso P&L-neutral (categoría de sistema del grupo `compra_inventario`, `ref_table='iem_purchase_cost'`, `skip_balance_check`); `reverse($movement_id)` (contrasiento); `is_available()`. |
 | `FIN_CSV` | `class-fin-csv.php` | Streaming CSV (movimientos + reportes), anti formula-injection. |
@@ -258,19 +267,41 @@ Los egresos por compra ahora se registran a mano como cualquier otro movimiento.
 
 ## Automatizaciones por pedido (`FIN_Orders`)
 
-### 1) Depósito → ingreso (automático al completar)
+### 1) Depósito → ingreso (al registrar el depósito — reconciliación incremental)
 
-`FIN_Orders::on_order_completed($order_id, $order)` está enganchado a
-`woocommerce_order_status_completed` (prioridad 20). Se dispara solo en la
-**transición** al estado completado.
+El ingreso se reconoce **en el momento del depósito**, no al completar, para que
+la caja configurada cuadre con el banco mientras el pedido sigue pendiente.
+`FIN_Orders::reconcile_deposit_income($order)` se invoca desde dos enganches:
 
-- Lee el meta `_hpos_ardxoz_woo_monto_deposito` y registra un **ingreso** por ese
-  monto contra la caja configurada.
+- **`hawd_deposit_registered`** (`$order_id`, `$order`) — action que DEMV dispara
+  cada vez que guarda un depósito (Express / Admin / Caja). Es el disparo principal.
+- **`woocommerce_order_status_completed`** (prioridad 20) — red de seguridad por si
+  el depósito se registró por una vía que no disparó la action (legado / edición
+  manual del meta).
+
+Lógica (**incremental, no un único ingreso por pedido**):
+
+- Lee `_hpos_ardxoz_woo_monto_deposito` ACTUAL y lo compara con lo ya ingresado en
+  el ledger para ese pedido (`FIN_Movements::posted_amount_for_ref('order_deposit',
+  order_id)`, suma neta firmada). Registra **solo el delta positivo**.
+- **Fecha del movimiento = fecha real del depósito** (`_hpos_ardxoz_woo_fecha_deposito`),
+  no la de completado → la caja cuadra con el extracto por fecha de depósito.
 - Opciones: `fin_order_deposit_autopost`, `fin_order_deposit_account`,
-  `fin_order_deposit_category` (categoría de naturaleza **ingreso**).
-- Idempotente por `ref_table='order_deposit'` + `ref_id`=id de pedido.
-- Fecha del movimiento = **fecha de completado**. Si falta cuenta/categoría, se
-  omite en silencio.
+  `fin_order_deposit_category` (naturaleza **ingreso**). Si falta cuenta/categoría
+  o no hay delta, se omite en silencio.
+- **Idempotente por reconciliación** (no por `exists_for_ref`): admite **varios**
+  movimientos `ref_table='order_deposit'`·`ref_id`=pedido. Si el total ya fue
+  ingresado (incluido el esquema antiguo de un solo movimiento al completar), el
+  delta es 0 y no registra nada. Una **baja** del depósito NO genera contrasiento
+  automático (corrección manual).
+- **Pedidos mitad efectivo / mitad QR (DEMV):** generan **dos** ingresos — la parte
+  **QR** al depositar por Express (su fecha) y la parte de **efectivo** al aprobar
+  la **Caja Efectivo** (que la pliega en `monto_deposito`, su fecha). Cada parte
+  entra a la cuenta cuando el dinero realmente llega; sin doble conteo. No se lee
+  `monto_efectivo` (el plegado lo hace DEMV; ver DEMV regla 24). Edge pre-existente
+  fuera de finanzas: en IBEX el umbral de completado de Caja usa `total` y
+  `monto_deposito` tope = 93% del total, por lo que un IBEX+efectivo podría no
+  auto-completarse (pero los ingresos del depósito sí se registran por la action).
 
 ### 2) Costo de envío (courier) → egreso (Caja Chica) — registro MANUAL por día
 

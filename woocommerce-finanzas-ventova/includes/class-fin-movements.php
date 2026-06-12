@@ -681,6 +681,36 @@ class FIN_Movements
         ), ARRAY_A) ?: null;
     }
 
+    /**
+     * Monto NETO VIGENTE ya registrado en el ledger para una referencia (suma
+     * firmada por dirección: ingresos suman, egresos restan). Sirve para la
+     * reconciliación incremental: cuántos Bs siguen ingresados por este documento,
+     * para registrar solo el delta pendiente.
+     *
+     * EXCLUYE los movimientos **anulados** (`reversed_at` no nulo) y los propios
+     * **contrasientos** (`reverses_id` no nulo). Esto importa porque `reverse()`
+     * NO copia `ref_table`/`ref_id` al contrasiento: si no se filtrara el original
+     * anulado, seguiría contando como "ya ingresado" y la reconciliación nunca
+     * volvería a registrar tras una anulación. Al excluirlo, anular un ingreso
+     * baja el neto vigente y el siguiente depósito/completado re-registra el delta.
+     *
+     * @return float neto en la moneda de los movimientos (se asume una sola caja).
+     */
+    public static function posted_amount_for_ref($ref_table, $ref_id)
+    {
+        global $wpdb;
+        $t = FIN_Schema::table('movements');
+        $val = $wpdb->get_var($wpdb->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN direction = 'I' THEN amount ELSE -amount END), 0)
+             FROM $t
+             WHERE ref_table = %s AND ref_id = %d
+               AND reverses_id IS NULL
+               AND reversed_at IS NULL",
+            (string) $ref_table, (int) $ref_id
+        ));
+        return round((float) $val, 2);
+    }
+
     /** ¿Ya existe un movimiento para esta referencia? (idempotencia integración). */
     public static function exists_for_ref($ref_table, $ref_id)
     {

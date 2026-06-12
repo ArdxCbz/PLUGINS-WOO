@@ -6,13 +6,16 @@ if (!defined('ABSPATH')) {
 /**
  * Automatizaciones a partir de pedidos de WooCommerce — v1.0.
  *
- * Cuando un pedido pasa a "completado" (hook `woocommerce_order_status_completed`,
- * que se dispara solo en la TRANSICIÓN al estado) se pueden registrar
- * automáticamente movimientos financieros. Dos automatizaciones, ambas opt-in e
+ * Automatizaciones financieras a partir de pedidos. Dos, ambas opt-in e
  * independientes:
  *
- *  1. DEPÓSITO (ingreso): registra un INGRESO por el valor del meta
- *     `_hpos_ardxoz_woo_monto_deposito` contra una caja configurable.
+ *  1. DEPÓSITO (ingreso): registra el INGRESO del `_hpos_ardxoz_woo_monto_deposito`
+ *     contra una caja configurable, EN EL MOMENTO DEL DEPÓSITO. DEMV avisa con la
+ *     action `hawd_deposit_registered` (Express/Admin/Caja) y aquí se reconcilia
+ *     el delta (ver `reconcile_deposit_income`); el hook de "completado" queda como
+ *     red de seguridad. Antes el ingreso esperaba a "completado", lo que dejaba la
+ *     caja descuadrada con el banco mientras el pedido seguía pendiente (típico en
+ *     pedidos con efectivo, que se completan al aprobar la Caja días después).
  *
  *  2. COSTO DE ENVÍO (egreso): NO es automático. El costo de envío de cada
  *     pedido (`_hpos_ardxoz_woo_costo_envio`) suele ajustarse durante el día, por
@@ -22,17 +25,18 @@ if (!defined('ABSPATH')) {
  *     validar se genera un egreso POR PEDIDO con fecha = creación del pedido. Los
  *     métodos de envío que disparan el egreso son CONFIGURABLES (no hardcodeados).
  *
- * Diseño común (idempotencia por ref + opt-in por configuración):
- *  - Idempotencia por (ref_table, ref_id=order_id): un `ref_table` distinto por
- *    automatización (`order_deposit` / `order_shipping`). Cada pedido admite
- *    como máximo UN movimiento de cada tipo. Si el pedido sale de completado y
- *    vuelve a completado, NO se vuelve a registrar.
+ * Diseño común (trazabilidad por ref + opt-in por configuración):
+ *  - Trazabilidad por (ref_table, ref_id=order_id): un `ref_table` distinto por
+ *    automatización (`order_deposit` / `order_shipping`). El **envío** admite como
+ *    máximo UN egreso por pedido (idempotencia por existencia). El **depósito** usa
+ *    **reconciliación incremental** (puede haber varios movimientos por pedido: la
+ *    suma neta = `monto_deposito`); cada disparo registra solo el delta pendiente.
  *  - Requiere cuenta + categoría (de la naturaleza correcta) configuradas; si
  *    falta cualquiera, la automatización se omite en silencio (off).
  *  - El egreso de envío usa skip_balance_check: es un hecho consumado (el
  *    pedido ya se entregó); no se bloquea por saldo.
- *  - Fecha del movimiento = fecha de completado del pedido (mejor para reportes
- *    por período).
+ *  - Fecha del movimiento: el depósito usa la **fecha real del depósito**; el
+ *    envío usa la fecha de creación del pedido.
  *  - Lectura de metas vía Meta_Resolver del plugin orders (HPOS + fallback ACF
  *    para pedidos viejos) si está disponible; si no, get_meta directo.
  */
@@ -82,15 +86,25 @@ class FIN_Orders
     /** Caché (transient) de métodos de envío recientes para el selector de Configuración. */
     const TRANSIENT_RECENT_METHODS = 'fin_recent_shipping_methods';
 
+    const META_DEPOSIT_DATE = '_hpos_ardxoz_woo_fecha_deposito';
+
     public static function init()
     {
         // Prioridad 20: después de que otros plugins (DEMV, etc.) hayan podido
         // calcular/guardar metas en la transición a completado.
         add_action('woocommerce_order_status_completed', [__CLASS__, 'on_order_completed'], 20, 2);
+
+        // DEMV avisa cada vez que registra un depósito (Express/Admin/Caja). El
+        // ingreso se reconoce EN EL MOMENTO DEL DEPÓSITO, no al completar, para que
+        // la caja no quede descuadrada mientras el pedido sigue pendiente (típico
+        // en pedidos con efectivo que se completan al aprobar la Caja días después).
+        add_action('hawd_deposit_registered', [__CLASS__, 'on_deposit_registered'], 10, 2);
     }
 
     /**
-     * Handler del cambio de estado a "completado".
+     * Handler del cambio de estado a "completado". Reconcilia por si el depósito
+     * se registró por una vía que no disparó `hawd_deposit_registered` (legado,
+     * edición manual del meta): ingresa el delta que aún falte.
      *
      * @param int            $order_id
      * @param WC_Order|mixed $order
@@ -104,28 +118,66 @@ class FIN_Orders
             return;
         }
 
-        self::try_deposit($order);
+        self::reconcile_deposit_income($order);
         // El egreso de costo de envío YA NO es automático: se registra a mano
         // desde el panel diario (ver shipping_day_orders / register_shipping_egreso).
     }
 
-    // ── Automatización 1: depósito → ingreso ─────────────────────────────────
+    /**
+     * Handler del aviso de depósito de DEMV (`hawd_deposit_registered`): ingresa
+     * a la cuenta el delta del depósito recién registrado.
+     *
+     * @param int            $order_id
+     * @param WC_Order|mixed $order
+     */
+    public static function on_deposit_registered($order_id, $order = null)
+    {
+        if (!($order instanceof WC_Order)) {
+            $order = wc_get_order($order_id);
+        }
+        if ($order) {
+            self::reconcile_deposit_income($order);
+        }
+    }
+
+    // ── Automatización 1: depósito → ingreso (reconciliación incremental) ────
+    //
+    // El ingreso se reconoce EN EL MOMENTO DEL DEPÓSITO (action de DEMV
+    // `hawd_deposit_registered`), no al completar. `reconcile_deposit_income()`
+    // compara `monto_deposito` actual vs. lo ya ingresado y registra solo el delta.
+    // Pedidos mitad efectivo/QR: la parte QR entra al depositar por Express y la
+    // parte de efectivo al aprobar la Caja (que la pliega en `monto_deposito`),
+    // cada una con su fecha real. No se lee `monto_efectivo` aquí: el plegado lo
+    // hace DEMV. Idempotente por reconciliación (no duplica).
 
     public static function deposit_enabled()
     {
         return (int) get_option(self::OPT_DEP_AUTOPOST, 0) === 1;
     }
 
-    private static function try_deposit(WC_Order $order)
+    /**
+     * Reconciliación incremental del depósito → ingreso. Se invoca cuando DEMV
+     * registra/actualiza el depósito (`hawd_deposit_registered`) y, como red de
+     * seguridad, al completar el pedido.
+     *
+     * En vez de un único ingreso por pedido, compara el `monto_deposito` ACTUAL
+     * contra lo ya ingresado en el ledger para ese pedido (suma neta) y registra
+     * únicamente el DELTA positivo. Así:
+     *   - El dinero entra a la cuenta apenas se registra el depósito (no hay que
+     *     esperar a "completado"), de modo que la caja cuadra con el banco.
+     *   - Pedidos mitad efectivo/QR generan DOS ingresos: la parte QR al depositar
+     *     por Express y la parte de efectivo al aprobar la Caja, cada una con su
+     *     fecha real de depósito.
+     *   - Es idempotente: si no hay delta (ya ingresado todo, o registros antiguos
+     *     hechos al completar) no registra nada. Una baja del depósito NO genera
+     *     contrasiento automático (corrección manual).
+     */
+    private static function reconcile_deposit_income(WC_Order $order)
     {
         if (!self::deposit_enabled()) {
             return;
         }
         $order_id = $order->get_id();
-
-        if (FIN_Movements::exists_for_ref(FIN_Movements::REF_ORDER_DEPOSIT, $order_id)) {
-            return; // ya registrado
-        }
 
         $account_id = self::valid_account(self::OPT_DEP_ACCOUNT);
         if ($account_id <= 0) {
@@ -136,26 +188,36 @@ class FIN_Orders
             return; // sin categoría ingreso configurada
         }
 
-        $amount = self::read_amount($order, self::META_DEPOSIT);
-        if ($amount <= 0) {
-            return; // sin monto de depósito
+        $deposited = self::read_amount($order, self::META_DEPOSIT);
+        if ($deposited <= 0) {
+            return; // sin monto de depósito todavía
+        }
+
+        $already = FIN_Movements::posted_amount_for_ref(FIN_Movements::REF_ORDER_DEPOSIT, $order_id);
+        $delta   = round($deposited - $already, 2);
+        if ($delta <= 0.01) {
+            return; // ya ingresado (o el depósito no aumentó): nada que registrar
         }
 
         $number = (string) $order->get_order_number();
+        $desc   = $already > 0.01
+            ? sprintf('Depósito pedido #%s (complemento)', $number)
+            : sprintf('Depósito pedido #%s', $number);
+
         FIN_Movements::register([
             'account_id'    => $account_id,
             'type'          => 'ingreso',
-            'amount'        => $amount,
+            'amount'        => $delta,
             'category_id'   => $category_id,
-            'description'   => sprintf('Depósito pedido #%s', $number),
-            'movement_date' => self::completed_date($order),
+            'description'   => $desc,
+            'movement_date' => self::deposit_date($order),
             'ref_table'     => FIN_Movements::REF_ORDER_DEPOSIT,
             'ref_id'        => $order_id,
             'ref_code'      => $number,
             'user_id'       => get_current_user_id(),
         ]);
-        // El WP_Error eventual se ignora: el cambio de estado del pedido no debe
-        // fallar por un problema de registro financiero.
+        // El WP_Error eventual se ignora: el registro financiero no debe romper el
+        // flujo del depósito/cambio de estado del pedido.
     }
 
     // ── Costo de envío → egreso (Caja Chica) — registro MANUAL por día ───────
@@ -912,6 +974,26 @@ class FIN_Orders
             return $dc->date('Y-m-d H:i:s');
         }
         return current_time('mysql');
+    }
+
+    /**
+     * Fecha REAL del depósito (`_hpos_ardxoz_woo_fecha_deposito`, 'Y-m-d') para
+     * datar el ingreso en la cuenta. Así la caja cuadra con el extracto bancario
+     * por fecha de depósito, no por fecha de completado. Fallback: completado/ahora.
+     */
+    private static function deposit_date(WC_Order $order)
+    {
+        $raw = '';
+        if (class_exists('\HPOS\Ardxoz\Woo\Orders\Meta_Resolver')) {
+            $raw = \HPOS\Ardxoz\Woo\Orders\Meta_Resolver::get($order, self::META_DEPOSIT_DATE);
+        } else {
+            $raw = $order->get_meta(self::META_DEPOSIT_DATE, true);
+        }
+        $raw = trim((string) $raw);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+            return $raw . ' ' . current_time('H:i:s');
+        }
+        return self::completed_date($order);
     }
 
     /** Fecha de CREACIÓN del pedido en 'Y-m-d H:i:s', o ahora si no está. */
