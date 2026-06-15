@@ -104,27 +104,6 @@ class HPOS_Ardxoz_Woo_Actions_Modals
             </div>
         </div>
 
-        <!-- Modal Cambiar Envío (admin) -->
-        <div id="hawa-modal-cambiar-envio" class="hawa-modal">
-            <div class="hawa-modal-content">
-                <span class="hawa-modal-close">&times;</span>
-                <h3>Cambiar Método de Envío</h3>
-                <input type="hidden" name="order_id" value="">
-
-                <label>Seleccionar Nuevo Método:</label>
-                <select name="new_shipping_method" style="width:100%; margin-bottom:15px;">
-                    <option value="IBEX">IBEX</option>
-                    <option value="CBS">CBS</option>
-                    <option value="SUECIA">SUECIA</option>
-                    <option value="LOCAL">LOCAL</option>
-                    <option value="ENCOMIENDA">ENCOMIENDA</option>
-                </select>
-
-                <div class="hawa-modal-footer">
-                    <button id="hawa-save-cambiar-envio" class="button button-primary">Guardar</button>
-                </div>
-            </div>
-        </div>
         <?php
     }
 

@@ -94,9 +94,16 @@ document.addEventListener('DOMContentLoaded', function () {
         var orderNum = btn.getAttribute('data-order-number');
         var shipMethod = (btn.getAttribute('data-shipping-method') || '').toUpperCase();
         var montoActual = btn.getAttribute('data-monto-efectivo');
+        var costoActual = btn.getAttribute('data-costo-envio');
 
         document.getElementById('hawa-guia-order-id').value = orderId;
-        
+
+        // Costo de envío: si ya está registrado lo mostramos; si no, queda el default.
+        var inputCosto = document.getElementById('hawa-guia-costo');
+        if (costoActual && parseFloat(costoActual) > 0) {
+            inputCosto.value = costoActual;
+        }
+
         // Lógica condicional: SUECIA o CBS (Solo Método de Envío)
         var isSpecial = shipMethod.includes('SUECIA') || shipMethod.includes('CBS');
         

@@ -17,7 +17,6 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
         add_action('wp_ajax_hawa_save_recibido', array(__CLASS__, 'save_recibido'));
         add_action('wp_ajax_hawa_save_retorno', array(__CLASS__, 'save_retorno'));
         add_action('wp_ajax_hawa_save_encurso', array(__CLASS__, 'save_encurso'));
-        add_action('wp_ajax_hawa_cambiar_envio', array(__CLASS__, 'cambiar_envio'));
         add_action('wp_ajax_hawa_cambiar_estado', array(__CLASS__, 'cambiar_estado'));
 
         // Vendedor actions
@@ -210,34 +209,6 @@ class HPOS_Ardxoz_Woo_Actions_Ajax
         $order->save();
 
         wp_send_json_success(array('message' => 'Pedido en curso'));
-    }
-
-    // ── Admin: Cambiar Método Envío ────────────────────────
-
-    public static function cambiar_envio()
-    {
-        self::verify_admin_nonce();
-        $order = self::get_order_or_fail();
-
-        $new_method = sanitize_text_field($_POST['new_method'] ?? '');
-        if (!$new_method) {
-            wp_send_json_error(array('message' => 'Método requerido'));
-        }
-
-        $shipping_items = $order->get_items('shipping');
-        if (!empty($shipping_items)) {
-            foreach ($shipping_items as $item) {
-                $item->set_method_title($new_method);
-                $item->save();
-            }
-        } else {
-            $item = new WC_Order_Item_Shipping();
-            $item->set_method_title($new_method);
-            $order->add_item($item);
-        }
-
-        $order->save();
-        wp_send_json_success(array('message' => 'Método de envío actualizado'));
     }
 
     // ── Admin: Cambiar Estado Simple ───────────────────────

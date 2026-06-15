@@ -58,11 +58,18 @@ class HPOS_Ardxoz_Woo_Actions_Columns
         // En Curso (abre modal guía)
         $shipping_method = $order->get_shipping_method();
         $monto_actual = $order->get_meta('_hpos_ardxoz_woo_monto_efectivo', true);
-        echo '<button type="button" class="button hawa-btn hawa-btn-encurso" 
-                data-order-id="' . esc_attr($order_id) . '" 
+        // Costo de envío ya registrado (mismo fallback legacy que get_modal_data),
+        // para que el modal de guía lo muestre en vez del default fijo.
+        $costo_actual = $order->get_meta('_hpos_ardxoz_woo_costo_envio', true);
+        if ($costo_actual === '' || $costo_actual === null) {
+            $costo_actual = $order->get_meta('costo_courier', true);
+        }
+        echo '<button type="button" class="button hawa-btn hawa-btn-encurso"
+                data-order-id="' . esc_attr($order_id) . '"
                 data-order-number="' . esc_attr($order->get_order_number()) . '"
                 data-shipping-method="' . esc_attr($shipping_method) . '"
                 data-monto-efectivo="' . esc_attr($monto_actual) . '"
+                data-costo-envio="' . esc_attr($costo_actual) . '"
               >En curso</button>';
 
         echo '</div>';

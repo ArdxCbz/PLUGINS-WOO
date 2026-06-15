@@ -80,7 +80,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
             if (status === 'recibido') {
                 document.querySelector('#hawa-modal-recibido input[name="order_id"]').value = orderId;
-                document.getElementById('hawa_costo_envio').value = '';
+                // Muestra el costo de envío ya registrado si existe (antes se vaciaba siempre).
+                document.getElementById('hawa_costo_envio').value = d.costo_courier || '';
                 document.getElementById('hawa_recibido_postcode').value = d.shipping_postcode || '';
                 document.getElementById('hawa-recibido-guia-wrapper').style.display =
                     method.indexOf('ENCOMIENDA') !== -1 ? 'block' : 'none';
@@ -194,41 +195,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     setTimeout(function () { location.reload(); }, 800);
                 } else {
                     alert('Error: ' + (res.data?.message || 'Desconocido'));
-                }
-            });
-        });
-    }
-
-    // ── Cambiar Método Envío ──────────────────────────────
-
-    document.addEventListener('click', function (e) {
-        var btn = e.target.closest('.hawa-abrir-modal-envio');
-        if (!btn) return;
-        e.preventDefault();
-        var orderId = btn.getAttribute('data-order-id');
-        var current = btn.getAttribute('data-current-method');
-        document.querySelector('#hawa-modal-cambiar-envio input[name="order_id"]').value = orderId;
-        var select = document.querySelector('#hawa-modal-cambiar-envio select[name="new_shipping_method"]');
-        if (select) select.value = current;
-        showModal('hawa-modal-cambiar-envio');
-    });
-
-    var btnCambiarEnvio = document.getElementById('hawa-save-cambiar-envio');
-    if (btnCambiarEnvio) {
-        btnCambiarEnvio.addEventListener('click', function () {
-            var orderId = document.querySelector('#hawa-modal-cambiar-envio input[name="order_id"]').value;
-            var newMethod = document.querySelector('#hawa-modal-cambiar-envio select[name="new_shipping_method"]').value;
-
-            if (!newMethod) return;
-            setButtonLoading(this, true);
-            ajaxPost('hawa_cambiar_envio', { order_id: orderId, new_method: newMethod }, function (res) {
-                setButtonLoading(btnCambiarEnvio, false);
-                if (res.success) {
-                    hideModal('hawa-modal-cambiar-envio');
-                    flashRow(orderId, '#fff8e1');
-                    setTimeout(function () { location.reload(); }, 800);
-                } else {
-                    alert('Error: ' + (res.data?.message || 'Error'));
                 }
             });
         });

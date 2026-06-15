@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Slug** | `hpos-ardxoz-woo-actions` |
-| **Versión** | 2.0 |
+| **Versión** | 2.1 |
 | **Autor** | Ardxoz |
 | **Prefijo constantes** | `HAWA_` |
 | **Prefijo clases** | `HPOS_Ardxoz_Woo_Actions_*` |
@@ -27,7 +27,7 @@ botones simplificados). Es solo capa de UI/AJAX: NO registra estados ni tablas; 
 | `includes/class-actions-assets.php` | Encola CSS/JS solo en pantalla de pedidos. Admin JS si `administrator`; Vendedor JS si rol `vendedor` o `administrator + ?simulate_vendedor`. Localiza nonces. |
 | `includes/class-actions-columns.php` | Para NO-admin: quita la columna `wc_actions` y añade `hawa_actions` con botones de vendedor. Hooks HPOS prioridad 50. |
 | `includes/class-actions-modals.php` | Renderiza el HTML de los modales en `admin_footer` (admin y/o vendedor según rol). |
-| `includes/class-actions-ajax.php` | 8 handlers AJAX. Escribe con `update_meta_data()+save()`. Lee con `Meta_Resolver` si existe. |
+| `includes/class-actions-ajax.php` | 7 handlers AJAX. Escribe con `update_meta_data()+save()`. Lee con `Meta_Resolver` si existe. |
 | `assets/js/actions-admin.js` | Lógica modales admin + **intercepta** `<a href*="status=recibido\|retorno\|en-curso">`. |
 | `assets/js/actions-vendedor.js` | Botones de columna vendedor: Recibido/Acomodar, Print, En curso → modal guía. |
 | `assets/css/actions-modals.css` | Estilos de los modales (clase `.show` para abrir). |
@@ -38,7 +38,7 @@ Todas son metas HPOS (`$order->get_meta()` / `update_meta_data()`). **No** usa `
 
 | Meta key (HPOS) | Escritura | Lectura | Notas |
 |---|---|---|---|
-| `_hpos_ardxoz_woo_costo_envio` | `save_recibido`, `save_encurso`, `vendedor_guia` | `get_modal_data` | `floatval`. Default UI = `HAWA_DEFAULT_COSTO_ENVIO` (12.48). |
+| `_hpos_ardxoz_woo_costo_envio` | `save_recibido`, `save_encurso`, `vendedor_guia` | `get_modal_data`, `render_column` (vendedor, `data-costo-envio`) | `floatval`. Default UI = `HAWA_DEFAULT_COSTO_ENVIO` (12.48). **Todos los modales pre-rellenan el costo ya registrado si existe** (regla 11). |
 | `_hpos_ardxoz_woo_numero_guia` | `save_encurso`, `vendedor_guia` | — | Se escribe **además** del `shipping_postcode` nativo (para búsqueda por guía de otros plugins). |
 | `_hpos_ardxoz_woo_monto_efectivo` | `save_encurso` (admin, sin guard), `vendedor_guia` (write-once) | `get_modal_data`, columna vendedor | `floatval(substr(...,0,9))`. Vendedor: solo escribe si estaba vacío. |
 | `_hpos_ardxoz_woo_fecha_retorno` | `save_retorno` | — | Fecha ingresada en modal Retorno. |
@@ -46,7 +46,8 @@ Todas son metas HPOS (`$order->get_meta()` / `update_meta_data()`). **No** usa `
 | `_hpos_ardxoz_woo_costo_retorno` | — | `get_modal_data` (fallback legacy `costo_retorno`) | Solo lectura aquí. |
 
 Lectura con fallback legacy directo (sin map): `get_modal_data` cae a `costo_courier` y
-`costo_retorno` si las HPOS están vacías.
+`costo_retorno` si las HPOS están vacías. `render_column` (vendedor) replica el mismo
+fallback `_hpos_ardxoz_woo_costo_envio` → `costo_courier` para el `data-costo-envio`.
 
 ## Opciones / transients
 
@@ -65,7 +66,7 @@ Ninguna propia. (Las invalidaciones de caché `hawd_stats_*` son responsabilidad
 
 **AJAX admin** (nonce `hawa_action`, cap `edit_shop_orders`):
 `hawa_get_modal_data`, `hawa_save_recibido`, `hawa_save_retorno`, `hawa_save_encurso`,
-`hawa_cambiar_envio`, `hawa_cambiar_estado`.
+`hawa_cambiar_estado`.
 
 **AJAX vendedor** (nonce `hawa_vendedor_action`, rol `vendedor` o cap `manage_woocommerce`):
 `hawa_vendedor_guia`, `hawa_vendedor_status`.
@@ -103,13 +104,23 @@ Ninguna propia. (Las invalidaciones de caché `hawd_stats_*` son responsabilidad
 7. **UI por rol, no por capacidad.** Admin ve modales completos; vendedor ve columna
    `hawa_actions`. Un admin puede previsualizar la UI de vendedor con `?simulate_vendedor` en
    la URL (la columna vendedor solo se pinta para admin si está ese GET).
-8. **Cambiar Envío modifica solo el `method_title`** del/los ítems de envío (string libre:
-   IBEX/CBS/SUECIA/LOCAL/ENCOMIENDA), no el `method_id`. Si no hay ítem de envío, crea uno.
+8. **Cambiar método de envío NO vive aquí.** Lo provee [[plugin-hpos-ardxoz-woo-orders]]
+   (link "Cambiar Método" → AJAX `hawo_cambiar_metodo_envio`, prefijo `hawo`) en su columna
+   de info. En la v2.1 se eliminó el duplicado huérfano de este plugin (modal
+   `#hawa-modal-cambiar-envio` + handler `hawa_cambiar_envio` + listener
+   `.hawa-abrir-modal-envio`): nunca se renderizaba el botón que lo abría y la funcionalidad
+   estaba 100% cubierta por woo-orders.
 9. **Este plugin NO registra los estados** que asigna. Son responsabilidad de
    [[plugin-hpos-ardxoz-woo-status]] (ver dependencia).
 10. La columna custom usa hooks **solo HPOS** (`woocommerce_shop_order_list_table_*`). En
     pantalla legacy `edit-shop_order` los assets/modales cargan pero la columna vendedor NO
     se pinta.
+11. **El costo de envío registrado se pre-rellena en TODOS los modales.** Si el pedido ya
+    tiene `_hpos_ardxoz_woo_costo_envio` (o el legacy `costo_courier`), ese valor se muestra
+    en lugar del default `HAWA_DEFAULT_COSTO_ENVIO`: **Recibido** y **En curso** (admin) lo
+    leen de `get_modal_data`; **Guía** (vendedor) lo recibe en el atributo `data-costo-envio`
+    del botón (el JS de vendedor no llama AJAX). Si no hay costo registrado: Recibido queda
+    vacío (input requerido), En curso/Guía muestran el default 12.48.
 
 ## Issues conocidos / deuda técnica
 
