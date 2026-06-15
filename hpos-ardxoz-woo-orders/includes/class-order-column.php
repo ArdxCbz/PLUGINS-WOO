@@ -99,6 +99,17 @@ class Order_Column
             echo '<span style="font-weight:bold; font-size:13px;">#' . esc_html($order_number) . '</span>';
         }
 
+        // Guía (movida desde la columna Información): debajo del nº de pedido, arriba de la fecha.
+        $tracking = Meta_Resolver::get($order, '_hpos_ardxoz_woo_numero_guia');
+        if (!$tracking) {
+            $tracking = $order->get_shipping_postcode();
+        }
+        if ($tracking) {
+            echo '<div style="font-size:11px; margin-top:3px;"><strong>Guía:</strong> <code style="background:#eef; padding:2px 4px; border-radius:3px;">' . esc_html($tracking) . '</code></div>';
+        } else {
+            echo '<div style="font-size:11px; margin-top:3px;"><strong>Guía:</strong> <span style="color:#d63638; font-weight:bold;">Sin Guía</span></div>';
+        }
+
         // Fecha
         if ($date_line) {
             echo '<div style="font-size:11px; color:#555; margin-top:2px;">' . esc_html($date_line) . '</div>';
