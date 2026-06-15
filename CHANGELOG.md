@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v2.3.0
+- **feat(orders):** Editor **en modal unificado** de la columna Información (v7.10) — el click en la celda abre un modal que edita de una vez **Forma de Envío, Costo de Envío, Forma de Pago** (solo pasarelas habilitadas) y **Notas del Cliente**, todo pre-cargado, y guarda con un único AJAX. Se quitaron los lápices/editores sueltos.
+- **feat(orders):** La **Guía** se movió a la primera columna (debajo del nº de pedido, arriba de la fecha); las **Notas del Cliente** se muestran solo si el pedido las tiene.
+- **feat(actions):** Todos los modales (Recibido, En curso y Guía del vendedor) **pre-rellenan el costo de envío** ya registrado en vez del default fijo (v2.1).
+- **refactor(actions):** Se eliminó el código muerto del "Cambiar Envío" duplicado (modal + AJAX + listener sin botón que lo dispare); la función real la provee `woo-orders`.
+- **feat(demv):** **Pago directo del cliente (prepago IBEX)** (v3.20) — en pedidos IBEX-COD el cliente puede pagar una parte directo (sin retención 7%): esa parte entra al banco full y el 7% cae solo sobre lo que cobra el courier. Incluye idempotencia anti doble-submit en Express y Admin.
+- **docs(complementos):** PLUGIN.md de `actions` y `orders` sincronizados con el código.
+
 ## v2.2.0
 - **feat(finanzas-ventova):** Nuevo plugin **Finanzas Ventova** (v2.10) — tesorería y contabilidad básica: cuentas en Bs/USD, movimientos (ingreso/egreso/transferencia) con saldo corrido y validación, categorías/grupos contables, y reportes (flujo de caja, gastos por categoría, Estado de Resultados con CMV desde el Kardex de Inventario y retención IBEX 7%). Integraciones suaves (`class_exists`) con Inventario y DEMV.
 - **feat(inventory-csv-ventova):** Módulo de **Compras** completo (v3.49): borrador → recepción por variación (con reparto por color/sucursal), proveedores (CRUD), costos al recibir y **Kardex** central con saldo corrido.
