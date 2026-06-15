@@ -150,6 +150,21 @@ class HPOS_Ardxoz_Woo_DEMV_Ajax
             // Gate HPOS-only: pedidos con solo metas legacy ACF SÍ pueden
             // re-completarse para migrar el depósito al formato HPOS nuevo.
             $existing = (string) HPOS_Ardxoz_Woo_DEMV_Meta::get_hpos_only($order, '_hpos_ardxoz_woo_numero_deposito');
+
+            // Idempotencia anti doble-submit: si ESTE comprobante ya está aplicado
+            // al pedido, es un reenvío duplicado. Se omite para no duplicar el
+            // depósito. (Los nºs de depósito no contienen '-', regla de Caja.)
+            if ($existing !== '' && in_array($comprobante, explode('-', $existing), true)) {
+                $results[] = array(
+                    'id'     => $order_id,
+                    'number' => $order->get_order_number(),
+                    'status' => 'skipped',
+                    'reason' => 'Comprobante ' . $comprobante . ' ya aplicado a este pedido',
+                );
+                $skipped++;
+                continue;
+            }
+
             if ($existing !== '') {
                 $topup = HPOS_Ardxoz_Woo_DEMV_Calculator::get_topup_info($order);
                 if (!$topup) {

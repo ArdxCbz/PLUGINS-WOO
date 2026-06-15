@@ -111,6 +111,10 @@
 .hawd-dx-amount-final { font-weight: 700; color: #1a7c3e; }
 .hawd-dx-amount-strike { color: #999; text-decoration: line-through; font-size: 11px; }
 .hawd-dx-discount-line { display: block; font-size: 10px; color: #c0392b; }
+.hawd-dx-field-directo { margin-top: 4px; }
+.hawd-dx-check { display: flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+.hawd-dx-check input[disabled] { cursor: not-allowed; }
+.hawd-dx-directo-hint { display: block; margin-top: 2px; font-size: 11px; color: #6b7280; line-height: 1.35; }
 
 /* ── Footer ───────────────────────────────────────────────────────────── */
 

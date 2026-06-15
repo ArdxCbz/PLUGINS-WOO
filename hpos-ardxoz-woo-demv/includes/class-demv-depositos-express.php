@@ -153,6 +153,15 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
                             <input type="number" step="0.01" min="0" id="hawd_dx_m_monto_real" class="widefat"
                                    placeholder="0,00" inputmode="decimal" autocomplete="off">
                         </div>
+                        <div class="hawd-dx-field hawd-dx-field-directo">
+                            <label class="hawd-dx-check">
+                                <input type="checkbox" id="hawd_dx_m_directo">
+                                Adelanto
+                            </label>
+                            <small class="hawd-dx-directo-hint">
+                                Marcar solo si el Cliente hizo un Adelanto
+                            </small>
+                        </div>
                     </div>
                     <div class="hawd-dx-modal-totals">
                         <span><span id="hawd_dx_m_count">0</span> pedidos seleccionados</span>
@@ -316,10 +325,17 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
         $comprobante = sanitize_text_field($_POST['comprobante'] ?? '');
         $monto_real  = isset($_POST['monto_real']) ? (float) str_replace(',', '.', (string) $_POST['monto_real']) : 0.0;
         $absorber_id = isset($_POST['absorber_id']) ? (int) $_POST['absorber_id'] : 0;
+        // Pago directo del cliente: este depósito entra full (sin retención IBEX).
+        // Se acumula como prepago; el 7% caerá solo sobre el resto (lo COD).
+        $pago_directo = !empty($_POST['pago_directo']);
 
         if (empty($order_ids))                    wp_send_json_error(['message' => 'No hay pedidos seleccionados']);
         if ($fecha === '' || $comprobante === '') wp_send_json_error(['message' => 'Fecha y comprobante son requeridos']);
         if ($monto_real <= 0)                     wp_send_json_error(['message' => 'El monto depositado debe ser mayor a cero']);
+        // El pago directo se registra de a un pedido (el monto es su prepago).
+        if ($pago_directo && count($order_ids) !== 1) {
+            wp_send_json_error(['message' => 'El pago directo del cliente se registra sobre un solo pedido a la vez.']);
+        }
 
         $results   = [];
         $processed = 0;
@@ -331,6 +347,7 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
         $orders_validos    = [];
         $topup_info_map    = [];
         $esperado_override = [];
+        $prepago_target    = []; // oid => prepago acumulado a persistir (pago directo)
         foreach ($order_ids as $oid) {
             $order = wc_get_order($oid);
             if (!$order) {
@@ -340,6 +357,32 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
             }
             // Gate HPOS-only: legacy ACF NO bloquea (permite migrar a HPOS).
             $existing = (string) HPOS_Ardxoz_Woo_DEMV_Meta::get_hpos_only($order, '_hpos_ardxoz_woo_numero_deposito');
+
+            // Idempotencia anti doble-submit: si ESTE comprobante ya está aplicado
+            // al pedido, es un reenvío duplicado (mismo nº de depósito). Se omite
+            // ANTES de tocar prepago/plan para no duplicar el depósito ni el
+            // adelanto. (Los nºs de depósito no contienen '-', regla de Caja.)
+            if ($existing !== '' && in_array($comprobante, explode('-', $existing), true)) {
+                $results[] = [
+                    'id'     => $oid,
+                    'number' => $order->get_order_number(),
+                    'status' => 'skipped',
+                    'reason' => 'Comprobante ' . $comprobante . ' ya aplicado a este pedido',
+                ];
+                $skipped++;
+                continue;
+            }
+
+            // Pago directo: acumula el monto como prepago ANTES de evaluar el gate
+            // y el plan, para que calcular()/get_topup_info ya usen el esperado del
+            // lado banco con el efectivo directo a valor full (solo 1 pedido). Se
+            // guarda también el target para RE-ESCRIBIRLO justo antes del save()
+            // (el set en memoria aquí se pierde al recalcular el plan).
+            if ($pago_directo) {
+                $prepago_nuevo = round(HPOS_Ardxoz_Woo_DEMV_Calculator::prepago_directo($order) + $monto_real, 2);
+                $order->update_meta_data(HPOS_Ardxoz_Woo_DEMV_Calculator::META_PREPAGO_DIRECTO, $prepago_nuevo);
+                $prepago_target[(int) $order->get_id()] = $prepago_nuevo;
+            }
             if ($existing !== '') {
                 $topup = HPOS_Ardxoz_Woo_DEMV_Calculator::get_topup_info($order);
                 if (!$topup) {
@@ -410,6 +453,16 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
                     $order->update_meta_data('_hpos_ardxoz_woo_numero_deposito',  $comprobante);
                     $order->update_meta_data('_hpos_ardxoz_woo_monto_deposito',   $monto);
                 }
+                // Pago directo: re-asegura el prepago acumulado en el MISMO save()
+                // que persiste monto_deposito (el set del gate loop se pierde al
+                // recalcular el plan). Sin esto, el 2.º depósito leería prepago=0
+                // y volvería a aplicar la retención sobre el total (doble pago).
+                if (isset($prepago_target[$oid])) {
+                    $order->update_meta_data(
+                        HPOS_Ardxoz_Woo_DEMV_Calculator::META_PREPAGO_DIRECTO,
+                        $prepago_target[$oid]
+                    );
+                }
                 if ($complete) {
                     $order->set_status('completed');
                 }
@@ -432,6 +485,17 @@ class HPOS_Ardxoz_Woo_DEMV_Depositos_Express
                         number_format($monto_final, 2, ',', '.'),
                         number_format($topup['calc'], 2, ',', '.'),
                         $complete ? 'Pedido completado.' : 'Pedido sigue sin completar.'
+                    );
+                } elseif ($pago_directo) {
+                    // Pago directo del cliente: entra full (sin retención IBEX).
+                    // La retención 7% caerá solo sobre lo que cobre el courier.
+                    $prepago_acum = HPOS_Ardxoz_Woo_DEMV_Calculator::prepago_directo($order);
+                    $nota = sprintf(
+                        "Adelanto (Express, pago directo sin retención IBEX):\nFecha: %s\nComprobante: %s\nDepositado (full): %s Bs\nAdelanto acumulado: %s Bs\nLa retención 7%% IBEX se aplica solo a lo cobrado por el courier (COD).\n%s",
+                        $fecha, $comprobante,
+                        number_format($monto, 2, ',', '.'),
+                        number_format($prepago_acum, 2, ',', '.'),
+                        $complete ? 'Pedido completado.' : 'Pedido NO completado (queda saldo por cobrar).'
                     );
                 } elseif ($is_cash) {
                     // Pedido mitad efectivo / mitad QR: solo se deposita la parte

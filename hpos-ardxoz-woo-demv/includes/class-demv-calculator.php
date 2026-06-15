@@ -20,6 +20,14 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
     const FEE_IBEX_COD = 0.07; // 7%
 
     /**
+     * Meta del pedido: monto pagado DIRECTO por el cliente (sin retención IBEX).
+     * Se acumula al registrar un depósito marcado como "pago directo". En IBEX, la
+     * retención del 7% cae solo sobre la parte que cobra el courier (total −
+     * prepago); el prepago entra al banco a valor full.
+     */
+    const META_PREPAGO_DIRECTO = '_hpos_ardxoz_woo_monto_prepago_directo';
+
+    /**
      * Calcula el importe a depositar para un pedido.
      *
      * @param WC_Order $order
@@ -36,13 +44,27 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
             break;
         }
 
-        // IBEX + Contra Entrega = descuento 7%
+        // IBEX + Contra Entrega = retención 7%, PERO solo sobre la parte cobrada
+        // por el courier (COD). El pago directo del cliente (prepago) entra full.
         if (self::is_ibex_cod($shipping_title, $payment)) {
-            return round($total * (1 - self::FEE_IBEX_COD), 2);
+            $prepago  = min(self::prepago_directo($order), $total);
+            $cod_base = max(0.0, $total - $prepago);
+            return round($prepago + $cod_base * (1 - self::FEE_IBEX_COD), 2);
         }
 
         // Todos los demás casos: importe completo
         return round($total, 2);
+    }
+
+    /**
+     * Monto pre-pagado DIRECTO por el cliente (full, sin retención IBEX) acumulado
+     * en el pedido. Single source para `calcular()` y `sum_ibex_cod_retention()`.
+     *
+     * @return float
+     */
+    public static function prepago_directo($order)
+    {
+        return round((float) $order->get_meta(self::META_PREPAGO_DIRECTO), 2);
     }
 
     /**
@@ -76,17 +98,27 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
         global $wpdb;
         $orders_table = $wpdb->prefix . 'wc_orders';
         $items_table  = $wpdb->prefix . 'woocommerce_order_items';
+        $meta_table   = $wpdb->prefix . 'wc_orders_meta';
 
         $ids    = array_values(array_filter(array_map('intval', $order_ids)));
         $chunks = array_chunk($ids, 1000);
 
         foreach ($chunks as $chunk) {
             $placeholders = implode(',', array_fill(0, count($chunk), '%d'));
-            $args = array_merge($chunk, array(self::PAYMENT_COD, self::SHIPPING_IBEX));
+            // El prepago directo se descuenta de la base sobre la que se retiene
+            // el 7%: la retención cae solo sobre la parte cobrada por el courier.
+            $args = array_merge(
+                array(self::META_PREPAGO_DIRECTO),
+                $chunk,
+                array(self::PAYMENT_COD, self::SHIPPING_IBEX)
+            );
 
             $rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT o.total_amount
+                "SELECT o.total_amount, COALESCE(pm.meta_value, 0) AS prepago
                  FROM {$orders_table} o
+                 LEFT JOIN {$meta_table} pm
+                        ON pm.order_id = o.id
+                       AND pm.meta_key = %s
                  WHERE o.id IN ($placeholders)
                    AND o.payment_method_title = %s
                    AND EXISTS (
@@ -99,7 +131,9 @@ class HPOS_Ardxoz_Woo_DEMV_Calculator
             ));
 
             foreach ($rows as $r) {
-                $out['retained'] += (float) $r->total_amount * self::FEE_IBEX_COD;
+                $total   = (float) $r->total_amount;
+                $prepago = min(max(0.0, (float) $r->prepago), $total);
+                $out['retained'] += max(0.0, $total - $prepago) * self::FEE_IBEX_COD;
                 $out['count']++;
             }
         }

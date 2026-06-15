@@ -332,6 +332,24 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                 }
             }
 
+            // 2b. Prepago directo (pago full del cliente, sin retención IBEX). Se
+            //     usa para que el "esperado" de la Diferencia descuente el 7% solo
+            //     sobre la parte COD (coherente con Calculator::calcular).
+            $prepago_per_order = array();
+            $rows_pp = $wpdb->get_results($wpdb->prepare(
+                "SELECT order_id, meta_value
+                 FROM {$meta_table}
+                 WHERE order_id IN ($placeholders)
+                   AND meta_key = '_hpos_ardxoz_woo_monto_prepago_directo'",
+                $chunk
+            ));
+            foreach ($rows_pp as $r) {
+                $pp = (float) $r->meta_value;
+                if ($pp > 0) {
+                    $prepago_per_order[(int) $r->order_id] = $pp;
+                }
+            }
+
             // 3. Métodos de envío del chunk: primer método por pedido + ibex_set
             $rows_s = $wpdb->get_results($wpdb->prepare(
                 "SELECT order_id, order_item_name
@@ -389,9 +407,14 @@ class HPOS_Ardxoz_Woo_DEMV_Query
                 $payment = $payment_per_order[$oid] ?? '';
                 $status  = $status_per_order[$oid]  ?? '';
 
-                $expected = HPOS_Ardxoz_Woo_DEMV_Calculator::is_ibex_cod($metodo, $payment)
-                    ? round($total * (1 - HPOS_Ardxoz_Woo_DEMV_Calculator::FEE_IBEX_COD), 2)
-                    : round($total, 2);
+                if (HPOS_Ardxoz_Woo_DEMV_Calculator::is_ibex_cod($metodo, $payment)) {
+                    // El prepago directo entra full; el 7% cae solo sobre lo COD.
+                    $prepago  = min($prepago_per_order[$oid] ?? 0.0, $total);
+                    $cod_base = max(0.0, $total - $prepago);
+                    $expected = round($prepago + $cod_base * (1 - HPOS_Ardxoz_Woo_DEMV_Calculator::FEE_IBEX_COD), 2);
+                } else {
+                    $expected = round($total, 2);
+                }
 
                 $delta = round($monto - $expected, 2);
 

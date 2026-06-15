@@ -10,6 +10,7 @@
     if (typeof hawd_express === 'undefined') return;
 
     var lastResults = []; // filas devueltas por la última búsqueda
+    var submitting  = false; // guarda anti doble-submit (re-entrada / doble binding)
 
     function fmt(n) {
         n = parseFloat(n) || 0;
@@ -240,8 +241,14 @@
         $id('hawd_dx_m_esperado').text(fmt(total));
         $id('hawd_dx_m_diff_val').text('—').removeClass('hawd-dx-diff-pos hawd-dx-diff-neg hawd-dx-diff-zero');
         $id('hawd_dx_m_monto_real').val('');
+        $id('hawd_dx_m_directo').prop('checked', false);
+        // El pago directo es de a un pedido: deshabilita el check si hay varios.
+        $id('hawd_dx_m_directo').prop('disabled', items.length !== 1);
         $id('hawd_dx_m_results').hide().empty();
-        $id('hawd_dx_m_save').prop('disabled', false).text('Guardar');
+        submitting = false;
+        // Garantiza EXACTAMENTE un handler de guardar (anula doble binding por
+        // doble carga del script, y restaura el guardar tras un "Cerrar" previo).
+        $id('hawd_dx_m_save').off('click').on('click', doSave).prop('disabled', false).text('Guardar');
 
         buildAbsorberSelect(items);
         $id('hawd_dx_m_absorber_box').hide();
@@ -265,6 +272,8 @@
     }
 
     function doSave() {
+        if (submitting) return; // ya hay un guardado en curso: ignora el 2.º disparo
+
         var fecha       = $.trim($id('hawd_dx_m_fecha').val());
         var comprobante = $.trim($id('hawd_dx_m_comprobante').val());
         var monto       = parseFloat(($id('hawd_dx_m_monto_real').val() || '').replace(',', '.'));
@@ -294,16 +303,24 @@
             }
         }
 
+        var pagoDirecto = $id('hawd_dx_m_directo').is(':checked') ? 1 : 0;
+        if (pagoDirecto && ids.length !== 1) {
+            alert('El pago directo del cliente se registra sobre un solo pedido a la vez.');
+            return;
+        }
+
+        submitting = true;
         $id('hawd_dx_m_save').prop('disabled', true).text('Guardando…');
 
         $.post(hawd_express.ajax_url, {
-            action:      'hawd_dx_complete',
-            nonce:       hawd_express.nonce,
-            order_ids:   ids,
-            fecha:       fecha,
-            comprobante: comprobante,
-            monto_real:  monto,
-            absorber_id: absorberId
+            action:       'hawd_dx_complete',
+            nonce:        hawd_express.nonce,
+            order_ids:    ids,
+            fecha:        fecha,
+            comprobante:  comprobante,
+            monto_real:   monto,
+            absorber_id:  absorberId,
+            pago_directo: pagoDirecto
         }).done(function (resp) {
             if (!resp || !resp.success) {
                 alert((resp && resp.data && resp.data.message) || 'Error al guardar.');
@@ -325,15 +342,19 @@
                 '</ul>';
 
             $id('hawd_dx_m_results').html(html).show();
-            $id('hawd_dx_m_save').text('Cerrar').prop('disabled', false);
-            $id('hawd_dx_m_save').one('click', function (e) {
-                e.preventDefault();
-                closeModal();
-                doSearch(); // refrescar resultados
-            });
+            // El botón pasa a "Cerrar": se QUITA doSave (off) y se bindea solo el
+            // cierre, para que un clic en Cerrar no re-dispare el guardado.
+            $id('hawd_dx_m_save').text('Cerrar').prop('disabled', false)
+                .off('click').one('click', function (e) {
+                    e.preventDefault();
+                    closeModal();
+                    doSearch(); // refrescar resultados
+                });
         }).fail(function () {
             alert('Error de red al guardar.');
             $id('hawd_dx_m_save').prop('disabled', false).text('Guardar');
+        }).always(function () {
+            submitting = false;
         });
     }
 
