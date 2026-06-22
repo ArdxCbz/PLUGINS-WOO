@@ -5,7 +5,9 @@
 - **fix(finanzas-ventova):** La reconciliación del depósito corre bajo un **lock por pedido** (`GET_LOCK fin_dep_recon_<order_id>`), que evita el **doble registro por carrera** (doble clic / reintento simultáneo del mismo depósito).
 - **feat(demv):** **Depósitos Express** ahora **diagnostica el "Error de Red"** al guardar: el `.fail()` discrimina por status HTTP (0 = red/timeout/abortado · 403 = sesión/nonce o WAF · 5xx = servidor), lo loguea en consola y aclara que el depósito **NO** se registró; el `$.ajax` fija `timeout` explícito (v3.21).
 - **feat(orders):** El **modal unificado** de la columna Información permite **editar la Guía** (v7.11): se guarda en `shipping_postcode` —el campo principal que busca Depósitos Express— con precarga postcode→fallback `_hpos_ardxoz_woo_numero_guia`.
-- **docs(complementos):** PLUGIN.md de `finanzas-ventova`, `demv` y `orders` sincronizados con el código.
+- **feat(inventory-csv-ventova):** **Gastos de importación** — la captura **Bs / $ / TC** ahora es libre (v3.50): se llenan **dos cualquiera** de los tres campos y el tercero se calcula (`Bs+TC→$`, `$+TC→Bs`, `Bs+$→TC`); el campo calculado queda readonly y al enfocarlo toma el control. La caja sólo fija el par por defecto; el servidor (`resolve_amounts`) acepta cualquier combinación.
+- **feat(meta-feed):** Nuevo plugin **Ventova Meta Feed** (v1.1.0) — feed de catálogo para Meta (FB/IG/WhatsApp) con **una fila por producto PADRE** (no explota variaciones por `pa_sucursal`); XML RSS 2.0 + namespace `g:`, endpoint protegido por clave secreta y pantalla de ajustes en WooCommerce → Meta Feed.
+- **docs(complementos):** PLUGIN.md de `finanzas-ventova`, `demv`, `orders` e `inventory-csv-ventova` sincronizados con el código; `meta-feed` incluye su PLUGIN.md.
 
 ## v2.3.0
 - **feat(orders):** Editor **en modal unificado** de la columna Información (v7.10) — el click en la celda abre un modal que edita de una vez **Forma de Envío, Costo de Envío, Forma de Pago** (solo pasarelas habilitadas) y **Notas del Cliente**, todo pre-cargado, y guarda con un único AJAX. Se quitaron los lápices/editores sueltos.
