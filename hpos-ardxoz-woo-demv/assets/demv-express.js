@@ -312,15 +312,20 @@
         submitting = true;
         $id('hawd_dx_m_save').prop('disabled', true).text('Guardando…');
 
-        $.post(hawd_express.ajax_url, {
-            action:       'hawd_dx_complete',
-            nonce:        hawd_express.nonce,
-            order_ids:    ids,
-            fecha:        fecha,
-            comprobante:  comprobante,
-            monto_real:   monto,
-            absorber_id:  absorberId,
-            pago_directo: pagoDirecto
+        $.ajax({
+            url:     hawd_express.ajax_url,
+            method:  'POST',
+            timeout: 60000, // 60 s: un request colgado falla limpio en vez de quedar colgado indefinido
+            data: {
+                action:       'hawd_dx_complete',
+                nonce:        hawd_express.nonce,
+                order_ids:    ids,
+                fecha:        fecha,
+                comprobante:  comprobante,
+                monto_real:   monto,
+                absorber_id:  absorberId,
+                pago_directo: pagoDirecto
+            }
         }).done(function (resp) {
             if (!resp || !resp.success) {
                 alert((resp && resp.data && resp.data.message) || 'Error al guardar.');
@@ -350,8 +355,20 @@
                     closeModal();
                     doSearch(); // refrescar resultados
                 });
-        }).fail(function () {
-            alert('Error de red al guardar.');
+        }).fail(function (jqXHR, textStatus, errorThrown) {
+            // No tragar el motivo: exponer el status HTTP para poder diagnosticar.
+            //   0   = sin conexión / timeout / request abortado (red, firewall, recarga de página)
+            //   403 = sesión o nonce caducado, o regla WAF/mod_security
+            //   5xx = error del servidor (revisar logs de PHP)
+            var code = jqXHR.status;
+            var msg;
+            if (textStatus === 'timeout') msg = 'El servidor tardó demasiado (timeout). El depósito NO se registró: cerrá, verificá la lista y reintentá.';
+            else if (code === 0)          msg = 'No se pudo conectar (red, firewall o la página se recargó). El depósito NO se registró: cerrá, verificá la lista y reintentá.';
+            else if (code === 403)        msg = 'Sesión o seguridad expirada (403). Recargá la página e iniciá de nuevo. El depósito NO se registró.';
+            else if (code >= 500)         msg = 'Error del servidor (' + code + '). Avisá al administrador. El depósito NO se registró.';
+            else                          msg = 'Error al guardar (' + (textStatus || code) + '). El depósito NO se registró.';
+            console.error('[DEMV Express] fallo al guardar:', code, textStatus, errorThrown, jqXHR.responseText);
+            alert(msg);
             $id('hawd_dx_m_save').prop('disabled', false).text('Guardar');
         }).always(function () {
             submitting = false;
