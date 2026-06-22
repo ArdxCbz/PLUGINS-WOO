@@ -43,6 +43,12 @@ class Info_Column
         $payment_id      = $order->get_payment_method();
         $payment_title   = $order->get_payment_method_title();
         $customer_note   = $order->get_customer_note();
+        // Guía: principal en shipping_postcode (lo que busca Depósitos Express),
+        // con fallback a la meta del courier _hpos_ardxoz_woo_numero_guia.
+        $tracking = $order->get_shipping_postcode();
+        if ($tracking === '' || $tracking === null) {
+            $tracking = Meta_Resolver::get($order, '_hpos_ardxoz_woo_numero_guia');
+        }
 
         // El contenedor lleva los datos en data-* para poblar el modal sin un AJAX extra.
         $attrs = '';
@@ -54,6 +60,7 @@ class Info_Column
                    . ' data-costo="' . esc_attr($cost_val) . '"'
                    . ' data-pago="' . esc_attr($payment_id) . '"'
                    . ' data-pago-title="' . esc_attr($payment_title) . '"'
+                   . ' data-guia="' . esc_attr($tracking) . '"'
                    . ' data-notas="' . esc_attr($customer_note) . '"';
         }
 
@@ -139,6 +146,9 @@ class Info_Column
                 <h3 style="margin-top:0;">Editar pedido #<span id="hawo-info-num"></span></h3>
                 <input type="hidden" id="hawo-info-order-id" value="">
 
+                <label style="display:block; font-weight:600; margin-bottom:2px;">Guía (Nº de seguimiento):</label>
+                <input type="text" id="hawo-info-guia" maxlength="30" style="width:100%; padding:6px; margin-bottom:12px;" placeholder="Número de guía del courier">
+
                 <label style="display:block; font-weight:600; margin-bottom:2px;">Forma de Envío:</label>
                 <select id="hawo-info-envio" style="width:100%; padding:6px; margin-bottom:12px;">
                     <?php foreach ($methods as $m) {
@@ -178,6 +188,7 @@ class Info_Column
             var modal   = document.getElementById('hawo-modal-info');
             var elNum   = document.getElementById('hawo-info-num');
             var elId    = document.getElementById('hawo-info-order-id');
+            var elGuia  = document.getElementById('hawo-info-guia');
             var elEnvio = document.getElementById('hawo-info-envio');
             var elCosto = document.getElementById('hawo-info-costo');
             var elPago  = document.getElementById('hawo-info-pago');
@@ -215,6 +226,7 @@ class Info_Column
 
                 elId.value    = cell.dataset.orderId;
                 elNum.textContent = cell.dataset.orderNumber || cell.dataset.orderId;
+                elGuia.value  = cell.dataset.guia || '';
                 elCosto.value = cell.dataset.costo || '';
                 elNotas.value = cell.dataset.notas || '';
                 selectByContains(elEnvio, cell.dataset.envio);
@@ -234,6 +246,7 @@ class Info_Column
                 data.append('action', 'hawo_guardar_info');
                 data.append('security', infoNonce);
                 data.append('order_id', elId.value);
+                data.append('guia', elGuia.value);
                 data.append('metodo_envio', elEnvio.value);
                 data.append('costo', elCosto.value);
                 data.append('forma_pago', elPago.value);
@@ -312,6 +325,14 @@ class Info_Column
         // 4. Notas del cliente.
         if (isset($_POST['notas'])) {
             $order->set_customer_note(sanitize_textarea_field(wp_unslash($_POST['notas'])));
+        }
+
+        // 5. Guía → shipping_postcode (campo PRINCIPAL: es lo que busca Depósitos
+        //    Express). Se escribe tal cual el valor del modal, que viene precargado
+        //    desde el postcode actual: un guardado sin tocar la guía es no-op. NO se
+        //    escribe _hpos_ardxoz_woo_numero_guia (queda solo como fallback de lectura).
+        if (isset($_POST['guia'])) {
+            $order->set_shipping_postcode(sanitize_text_field(wp_unslash($_POST['guia'])));
         }
 
         $order->save();
