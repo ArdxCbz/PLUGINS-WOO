@@ -348,14 +348,21 @@ vive en el partial `templates/partials/purchase-expenses.php`, reutilizado por e
 borrador y por la vista de compra recibida.
 
 **Moneda dual (2.5+):** cada gasto guarda su valor en **Bs y en $** más el **tipo de
-cambio** aplicado, porque los USDT tienen muchos decimales y conviene calcular el TC a
-partir de los dos montos en lugar de teclearlo a ciegas:
+cambio** aplicado, porque los USDT tienen muchos decimales y conviene calcular el faltante
+a partir de los otros dos en lugar de teclearlo a ciegas.
 
-- **Caja en $** → se ingresan **Monto $** y **Monto Bs**, el **TC se calcula** (`Bs ÷ $`).
-  A Finanzas va el monto en $ con `rate = TC`.
-- **Caja en Bs** → se ingresan **Monto Bs** y **TC**, el **equivalente en $** se calcula
-  (`Bs ÷ TC`). A Finanzas va el monto en Bs con `rate = 1`; el TC y el $ quedan
-  informativos. El campo TC se pre-llena con el TC USD por defecto de Finanzas.
+Se llenan **dos cualquiera** de los tres campos (Bs, $, TC) y el **tercero se calcula**
+(`Bs + TC → $`, `$ + TC → Bs`, `Bs + $ → TC`). El front rastrea los dos campos editados
+más recientemente y deja el restante como **calculado** (readonly); al enfocar el campo
+calculado, este toma el control y el más antiguo pasa a calcularse. La **caja sólo fija el
+par por defecto**, no restringe lo que puedes editar (`resolve_amounts` en el servidor
+acepta cualquier combinación y normaliza):
+
+- **Caja en $** (par por defecto: **$** y **Bs**, calcula `TC = Bs ÷ $`). A Finanzas va el
+  monto en $ con `rate = TC`.
+- **Caja en Bs** (par por defecto: **Bs** y **TC**, calcula `$ = Bs ÷ TC`). A Finanzas va
+  el monto en Bs con `rate = 1`; el TC y el $ quedan informativos. El campo TC se pre-llena
+  con el TC USD por defecto de Finanzas.
 
 `amount` es el monto NATIVO posteado a Finanzas (en la moneda de la caja) y `fin_rate` la
 conversión a base que usa Finanzas (= `tc` si la caja es en $, = 1 si es en Bs). El

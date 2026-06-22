@@ -14,8 +14,10 @@ if (!defined('ABSPATH')) {
  * facturados (lo efectivamente posteado a Finanzas). Nota: a nivel interno el estado
  * facturado sigue siendo `active` y la acción AJAX `iem_validate_purchase_expense`.
  *
- * Moneda dual (2.5+): caja en $ → se ingresan $ y Bs y el TC se calcula; caja en Bs
- * → se ingresan Bs y TC y el equivalente en $ se calcula.
+ * Moneda dual (2.5+): se llenan dos cualquiera de los tres campos (Bs, $, TC) y el
+ * tercero se calcula (Bs+TC→$, $+TC→Bs, Bs+$→TC). El campo calculado queda readonly;
+ * al enfocarlo toma el control y el más antiguo pasa a calcularse. La caja sólo fija
+ * el par por defecto: caja en $ → $ y Bs (calcula TC); caja en Bs → Bs y TC (calcula $).
  *
  * @var bool   $ic_available
  * @var array  $ic_accounts   lista de cajas [id,name,currency,symbol,is_base,default_rate]
@@ -68,9 +70,10 @@ $ic_tc_avg = IEM_Import_Costs::tc_weighted_average($ic_purchase_id);
         <p class="iem-help" style="margin:0 0 10px;">
             Cada gasto se <strong>registra primero como pendiente</strong> (no toca la caja);
             luego se <strong>factura</strong> con el botón de su fila para postear el
-            <strong>egreso</strong> en la caja elegida. Si la caja es en <strong>$</strong>, ingresa el
-            monto en $ y en Bs y el <strong>TC se calcula</strong>; si es en <strong>Bs</strong>, ingresa el
-            monto en Bs y el <strong>TC</strong>, y el equivalente en $ se calcula.
+            <strong>egreso</strong> en la caja elegida. Llena <strong>dos cualquiera</strong> de los
+            tres campos (Bs, $ y TC) y el tercero se calcula solo: Bs + TC → $, $ + TC → Bs,
+            o Bs + $ → TC. El campo calculado queda bloqueado; haz clic en él para editarlo
+            y que se recalcule otro.
         </p>
 
         <div style="display:grid;grid-template-columns:1.3fr 1.2fr 0.9fr 0.9fr 0.9fr 0.7fr;gap:10px;align-items:end;max-width:980px;">
@@ -282,37 +285,81 @@ $ic_tc_avg = IEM_Import_Costs::tc_weighted_average($ic_purchase_id);
         $expSum.textContent = txt;
     }
 
-    // Vincula Bs/$/TC. Caja en Bs: editan Bs y TC, $ derivado. Caja en $: editan $ y Bs, TC derivado.
-    function recalcTriple(bobEl, usdEl, tcEl, isBase){
+    // --- Triple Bs / $ / TC ---------------------------------------------------
+    // El usuario llena dos cualquiera de los tres campos y el tercero se calcula.
+    // `order` = [reciente, anterior] con las claves de los dos campos que el usuario
+    // edita; el que falta es el calculado (queda readonly). Al enfocar el campo
+    // calculado, este "toma el control" y el más antiguo pasa a calcularse.
+    var TRIP_KEYS = ['bob', 'usd', 'tc'];
+    function tripComputed(order){
+        for (var i = 0; i < TRIP_KEYS.length; i++){
+            if (order.indexOf(TRIP_KEYS[i]) < 0) return TRIP_KEYS[i];
+        }
+        return 'tc';
+    }
+    function tripPush(order, key){
+        var i = order.indexOf(key);
+        if (i >= 0) order.splice(i, 1);
+        order.unshift(key);
+        while (order.length > 2) order.pop();
+        return order;
+    }
+    // Par por defecto. Caja en Bs: editas Bs + TC → calcula $. Caja en $: editas $ + Bs → calcula TC.
+    function tripDefaultOrder(isBase){ return isBase ? ['bob', 'tc'] : ['usd', 'bob']; }
+    function applyTripRO(bobEl, usdEl, tcEl, order){
+        var comp = tripComputed(order);
+        if (bobEl) bobEl.readOnly = (comp === 'bob');
+        if (usdEl) usdEl.readOnly = (comp === 'usd');
+        if (tcEl)  tcEl.readOnly  = (comp === 'tc');
+    }
+    function recalcTriple(bobEl, usdEl, tcEl, order){
         if (!bobEl || !usdEl || !tcEl) return;
+        applyTripRO(bobEl, usdEl, tcEl, order);
         var bob = parseFloat(bobEl.value || '0') || 0;
         var usd = parseFloat(usdEl.value || '0') || 0;
         var tc  = parseFloat(tcEl.value  || '0') || 0;
-        if (isBase) {
-            usdEl.readOnly = true;  tcEl.readOnly = false;
+        var comp = tripComputed(order);
+        if (comp === 'usd'){
             usdEl.value = (bob > 0 && tc > 0) ? trimNum(bob / tc) : '';
+        } else if (comp === 'bob'){
+            bobEl.value = (usd > 0 && tc > 0) ? (usd * tc).toFixed(2) : '';
         } else {
-            usdEl.readOnly = false; tcEl.readOnly = true;
             tcEl.value = (bob > 0 && usd > 0) ? trimNum(bob / usd) : '';
         }
     }
+    function fieldKey(el){
+        if (el.classList.contains('iem-exp-bob')) return 'bob';
+        if (el.classList.contains('iem-exp-usd')) return 'usd';
+        return 'tc';
+    }
+
     function addIsBase(){
         var opt = $expAccount ? $expAccount.options[$expAccount.selectedIndex] : null;
         return opt && opt.value ? (opt.getAttribute('data-base') === '1') : true;
     }
-    function recalcAdd(){ recalcTriple($expBob, $expUsd, $expTc, addIsBase()); }
+    var addOrder = tripDefaultOrder(addIsBase());
+    function recalcAdd(){ recalcTriple($expBob, $expUsd, $expTc, addOrder); }
 
     function syncExpCurrency(){
         var opt = $expAccount ? $expAccount.options[$expAccount.selectedIndex] : null;
         var hasCaja = !!(opt && opt.value);
         var isBase = addIsBase();
+        addOrder = tripDefaultOrder(isBase); // al cambiar de caja, vuelve al par por defecto
         if (hasCaja && isBase && (!$expTc.value || parseFloat($expTc.value) <= 0) && expUsdRate > 0) {
             $expTc.value = trimNum(expUsdRate);
         }
         recalcAdd();
     }
     if ($expAccount) { $expAccount.addEventListener('change', syncExpCurrency); }
-    [$expBob, $expUsd, $expTc].forEach(function(el){ if (el) el.addEventListener('input', recalcAdd); });
+    [['bob', $expBob], ['usd', $expUsd], ['tc', $expTc]].forEach(function(p){
+        var key = p[0], el = p[1];
+        if (!el) return;
+        // Enfocar el campo calculado: pasa a editable y el más antiguo se vuelve el calculado.
+        el.addEventListener('focus', function(){
+            if (tripComputed(addOrder) === key){ tripPush(addOrder, key); applyTripRO($expBob, $expUsd, $expTc, addOrder); }
+        });
+        el.addEventListener('input', function(){ tripPush(addOrder, key); recalcAdd(); });
+    });
     syncExpCurrency();
 
     function expEmptyRow(show){
@@ -409,25 +456,40 @@ $ic_tc_avg = IEM_Import_Costs::tc_weighted_average($ic_purchase_id);
         return {
             bob: tr.querySelector('.iem-exp-bob'),
             usd: tr.querySelector('.iem-exp-usd'),
-            tc:  tr.querySelector('.iem-exp-tc'),
-            isBase: tr.dataset.base === '1'
+            tc:  tr.querySelector('.iem-exp-tc')
         };
+    }
+    function rowOrder(tr){
+        if (!tr._iemOrder){ tr._iemOrder = tripDefaultOrder(tr.dataset.base === '1'); }
+        return tr._iemOrder;
     }
     function isExpField(el){
         return el && el.classList && (el.classList.contains('iem-exp-bob') ||
             el.classList.contains('iem-exp-usd') || el.classList.contains('iem-exp-tc'));
     }
+    $expTbody.addEventListener('focusin', function(e){
+        if (!isExpField(e.target)) return;
+        var tr = e.target.closest('tr'); if (!tr) return;
+        var ord = rowOrder(tr), key = fieldKey(e.target);
+        if (tripComputed(ord) === key){
+            tripPush(ord, key);
+            var t = rowTriple(tr);
+            applyTripRO(t.bob, t.usd, t.tc, ord);
+        }
+    });
     $expTbody.addEventListener('input', function(e){
         if (!isExpField(e.target)) return;
         var tr = e.target.closest('tr'); if (!tr) return;
         var t = rowTriple(tr);
-        recalcTriple(t.bob, t.usd, t.tc, t.isBase);
+        tripPush(rowOrder(tr), fieldKey(e.target));
+        recalcTriple(t.bob, t.usd, t.tc, rowOrder(tr));
     });
     $expTbody.addEventListener('change', function(e){
         if (!isExpField(e.target)) return;
         var tr = e.target.closest('tr'); if (!tr) return;
         var t = rowTriple(tr);
-        recalcTriple(t.bob, t.usd, t.tc, t.isBase);
+        tripPush(rowOrder(tr), fieldKey(e.target));
+        recalcTriple(t.bob, t.usd, t.tc, rowOrder(tr));
         var eid = tr.dataset.expenseId;
         var accId = parseInt(tr.dataset.account || '0', 10) || 0;
         var bob = parseFloat(t.bob.value || '0') || 0;
