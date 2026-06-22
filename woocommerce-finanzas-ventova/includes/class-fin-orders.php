@@ -188,36 +188,65 @@ class FIN_Orders
             return; // sin categoría ingreso configurada
         }
 
-        $deposited = self::read_amount($order, self::META_DEPOSIT);
-        if ($deposited <= 0) {
-            return; // sin monto de depósito todavía
+        // LOCK por pedido: serializa la reconciliación de ESTE depósito entre
+        // peticiones/conexiones distintas. El bloque leer-delta-registrar es un
+        // "check-then-act": sin lock, dos disparos concurrentes (doble clic /
+        // reintento simultáneo del mismo depósito) podrían leer AMBOS `already=0`
+        // —ninguno commiteó aún— y registrar el total dos veces. GET_LOCK es un lock
+        // asesor por NOMBRE: la 2.ª petición espera a que la 1.ª commitee y entonces
+        // ve el monto ya ingresado (delta 0). Si no se obtiene el lock, otra petición
+        // está reconciliando este mismo pedido ahora mismo: salimos sin duplicar.
+        global $wpdb;
+        $lock = 'fin_dep_recon_' . $order_id;
+        if ((int) $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, 5)', $lock)) !== 1) {
+            return;
         }
 
-        $already = FIN_Movements::posted_amount_for_ref(FIN_Movements::REF_ORDER_DEPOSIT, $order_id);
-        $delta   = round($deposited - $already, 2);
-        if ($delta <= 0.01) {
-            return; // ya ingresado (o el depósito no aumentó): nada que registrar
+        try {
+            // AUTORITATIVO: el monto del depósito se lee DIRECTO de la BD, no del
+            // objeto $order que llega por los hooks. Ese objeto puede tener el meta
+            // seteado en memoria por update_meta_data() pero SIN persistir todavía
+            // (p.ej. un save() de Express que falló a media escritura durante el bulk,
+            // o un status_transition a "completado" disparado sobre un pedido cuyo
+            // guardado luego se revirtió). Leer ese valor de memoria registraría un
+            // INGRESO FANTASMA: Finanzas tendría el ingreso aunque el pedido no quede
+            // con metas de depósito ni completado. Si en BD no hay depósito
+            // persistido, no se registra nada.
+            $deposited = self::persisted_deposit_amount($order_id);
+            if ($deposited <= 0) {
+                return; // sin depósito persistido todavía
+            }
+
+            $already = FIN_Movements::posted_amount_for_ref(FIN_Movements::REF_ORDER_DEPOSIT, $order_id);
+            $delta   = round($deposited - $already, 2);
+            if ($delta <= 0.01) {
+                return; // ya ingresado (o el depósito no aumentó): nada que registrar
+            }
+
+            $number = (string) $order->get_order_number();
+            $desc   = $already > 0.01
+                ? sprintf('Depósito pedido #%s (complemento)', $number)
+                : sprintf('Depósito pedido #%s', $number);
+
+            FIN_Movements::register([
+                'account_id'    => $account_id,
+                'type'          => 'ingreso',
+                'amount'        => $delta,
+                'category_id'   => $category_id,
+                'description'   => $desc,
+                'movement_date' => self::deposit_date($order),
+                'ref_table'     => FIN_Movements::REF_ORDER_DEPOSIT,
+                'ref_id'        => $order_id,
+                'ref_code'      => $number,
+                'user_id'       => get_current_user_id(),
+            ]);
+            // El WP_Error eventual se ignora: el registro financiero no debe romper el
+            // flujo del depósito/cambio de estado del pedido.
+        } finally {
+            // Se libera siempre (incluido el `return` dentro del try). Aun si el
+            // script muriera antes, MySQL suelta el lock al cerrar la conexión.
+            $wpdb->query($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $lock));
         }
-
-        $number = (string) $order->get_order_number();
-        $desc   = $already > 0.01
-            ? sprintf('Depósito pedido #%s (complemento)', $number)
-            : sprintf('Depósito pedido #%s', $number);
-
-        FIN_Movements::register([
-            'account_id'    => $account_id,
-            'type'          => 'ingreso',
-            'amount'        => $delta,
-            'category_id'   => $category_id,
-            'description'   => $desc,
-            'movement_date' => self::deposit_date($order),
-            'ref_table'     => FIN_Movements::REF_ORDER_DEPOSIT,
-            'ref_id'        => $order_id,
-            'ref_code'      => $number,
-            'user_id'       => get_current_user_id(),
-        ]);
-        // El WP_Error eventual se ignora: el registro financiero no debe romper el
-        // flujo del depósito/cambio de estado del pedido.
     }
 
     // ── Costo de envío → egreso (Caja Chica) — registro MANUAL por día ───────
@@ -980,20 +1009,57 @@ class FIN_Orders
      * Fecha REAL del depósito (`_hpos_ardxoz_woo_fecha_deposito`, 'Y-m-d') para
      * datar el ingreso en la cuenta. Así la caja cuadra con el extracto bancario
      * por fecha de depósito, no por fecha de completado. Fallback: completado/ahora.
+     *
+     * Se lee DIRECTO de la BD (autoritativo) por la misma razón que el monto: el
+     * objeto en memoria puede traer una fecha sin persistir.
      */
     private static function deposit_date(WC_Order $order)
     {
-        $raw = '';
-        if (class_exists('\HPOS\Ardxoz\Woo\Orders\Meta_Resolver')) {
-            $raw = \HPOS\Ardxoz\Woo\Orders\Meta_Resolver::get($order, self::META_DEPOSIT_DATE);
-        } else {
-            $raw = $order->get_meta(self::META_DEPOSIT_DATE, true);
-        }
-        $raw = trim((string) $raw);
+        $raw = trim((string) self::persisted_meta($order->get_id(), self::META_DEPOSIT_DATE));
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
             return $raw . ' ' . current_time('H:i:s');
         }
         return self::completed_date($order);
+    }
+
+    /**
+     * Lee un meta del pedido DIRECTO de la BD (autoritativo, inmune al objeto en
+     * memoria sin guardar). El sitio es HPOS, así que las metas del pedido viven
+     * en `wc_orders_meta` con la clave actual `_hpos_ardxoz_woo_*` (la que escriben
+     * MetaOrder y el Express de DEMV); se lee esa tabla por esa clave. Solo si HPOS
+     * no estuviera activo en algún entorno se cae a `postmeta`. Devuelve '' si no
+     * hay valor persistido.
+     */
+    private static function persisted_meta($order_id, $key)
+    {
+        global $wpdb;
+        $order_id = (int) $order_id;
+        if ($order_id <= 0) {
+            return '';
+        }
+
+        if (class_exists('\Automattic\WooCommerce\Utilities\OrderUtil')
+            && \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled()) {
+            $table = $wpdb->prefix . 'wc_orders_meta';
+            $val = $wpdb->get_var($wpdb->prepare(
+                "SELECT meta_value FROM $table WHERE order_id = %d AND meta_key = %s ORDER BY id DESC LIMIT 1",
+                $order_id, $key
+            ));
+            return $val !== null ? (string) $val : '';
+        }
+
+        $val = $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id DESC LIMIT 1",
+            $order_id, $key
+        ));
+        return $val !== null ? (string) $val : '';
+    }
+
+    /** Monto del depósito PERSISTIDO en BD, normalizado a float >= 0. */
+    private static function persisted_deposit_amount($order_id)
+    {
+        $clean = str_replace(',', '', (string) self::persisted_meta($order_id, self::META_DEPOSIT));
+        return round(max(0, (float) $clean), 2);
     }
 
     /** Fecha de CREACIÓN del pedido en 'Y-m-d H:i:s', o ahora si no está. */

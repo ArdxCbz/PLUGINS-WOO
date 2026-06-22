@@ -13,7 +13,25 @@ de resultados).
 - **Moneda:** Bolivianos (Bs/BOB), única. Helper global `fin_money()`.
 - **Dependencia:** WooCommerce activo (gate en `plugins_loaded`). **Opcionales (guardadas por `class_exists`):** plugin de Inventario (CMV desde el Kardex) y plugin **DEMV** (retención IBEX 7% en el Estado de Resultados, y resolución de la **sucursal** de cada pedido para dividir el pago IBEX — `get_orders_taxonomies()`/`SUCURSALES`); si faltan, esos valores se muestran en 0 y el pago IBEX cae al bucket `SIN SUCURSAL`.
 
-> Estado: **v2.12 — en desarrollo.** (2.12: `posted_amount_for_ref()` ahora cuenta
+> Estado: **v2.13 — en desarrollo.** (2.13: el **ingreso por depósito** ya no se
+> registra desde el objeto `$order` en memoria que llega por los hooks, sino que
+> lee el monto y la fecha del depósito **directo de la BD** (`persisted_meta()` →
+> HPOS `wc_orders_meta` por la clave actual `_hpos_ardxoz_woo_*`; `postmeta` solo si
+> HPOS no estuviera activo). Esto
+> mata el **ingreso fantasma**: cuando el pago Express fallaba a media escritura
+> (un `save()`/`status_transition` a "completado" que luego se revertía), el objeto
+> en memoria traía `monto_deposito` seteado pero sin persistir, y Finanzas
+> registraba un ingreso que quedaba huérfano —sin metas de depósito en el pedido y
+> sin completarlo—. Ahora, si en BD no hay depósito persistido, no se registra
+> nada; se conservan los dos disparadores —`hawd_deposit_registered` y la red de
+> seguridad `completed`— porque ambos pasan por la lectura autoritativa.
+> Además, la reconciliación se serializa con un **lock por pedido** (`GET_LOCK`
+> `fin_dep_recon_<order_id>`, liberado en `finally`): el bloque leer-delta-registrar
+> es un check-then-act, así que sin lock dos disparos concurrentes —doble clic /
+> reintento simultáneo del mismo depósito— podrían leer ambos `already=0` y
+> registrar el total dos veces; con el lock, la 2.ª petición espera a que la 1.ª
+> commitee y ve delta 0.)
+> (2.12: `posted_amount_for_ref()` ahora cuenta
 > solo los movimientos **vigentes** —excluye anulados (`reversed_at`) y contrasientos
 > (`reverses_id`)—; así, **anular** un ingreso de depósito baja el neto vigente y la
 > reconciliación vuelve a registrar el delta en el siguiente depósito/completado, en
@@ -281,9 +299,16 @@ la caja configurada cuadre con el banco mientras el pedido sigue pendiente.
 
 Lógica (**incremental, no un único ingreso por pedido**):
 
-- Lee `_hpos_ardxoz_woo_monto_deposito` ACTUAL y lo compara con lo ya ingresado en
-  el ledger para ese pedido (`FIN_Movements::posted_amount_for_ref('order_deposit',
-  order_id)`, suma neta firmada). Registra **solo el delta positivo**.
+- Lee `_hpos_ardxoz_woo_monto_deposito` ACTUAL **directo de la BD** (`persisted_meta()`,
+  no del objeto `$order` en memoria que puede traer el meta sin persistir) y lo
+  compara con lo ya ingresado en el ledger para ese pedido
+  (`FIN_Movements::posted_amount_for_ref('order_deposit', order_id)`, suma neta
+  firmada). Registra **solo el delta positivo**. Si en BD no hay depósito
+  persistido, no registra nada (evita el **ingreso fantasma** cuando un `save()` de
+  Express falla a media escritura; ver nota de v2.13). Toda la reconciliación corre
+  bajo un **lock por pedido** (`GET_LOCK fin_dep_recon_<order_id>`, liberado en
+  `finally`) que serializa disparos concurrentes y evita el doble registro por
+  carrera (doble clic / reintento simultáneo).
 - **Fecha del movimiento = fecha real del depósito** (`_hpos_ardxoz_woo_fecha_deposito`),
   no la de completado → la caja cuadra con el extracto por fecha de depósito.
 - Opciones: `fin_order_deposit_autopost`, `fin_order_deposit_account`,
