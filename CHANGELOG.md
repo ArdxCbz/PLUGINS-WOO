@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v2.4.0
+- **fix(finanzas-ventova):** El **ingreso por depósito** ahora lee el monto y la fecha **directo de la BD** (`persisted_meta()` → `wc_orders_meta`), no del objeto `$order` en memoria que llega por los hooks (v2.13). Esto elimina el **ingreso fantasma**: cuando un guardado de **Depósitos Express** fallaba a media escritura, Finanzas registraba un ingreso que quedaba huérfano (sin metas de depósito ni pedido completado). Si en BD no hay depósito persistido, no registra nada.
+- **fix(finanzas-ventova):** La reconciliación del depósito corre bajo un **lock por pedido** (`GET_LOCK fin_dep_recon_<order_id>`), que evita el **doble registro por carrera** (doble clic / reintento simultáneo del mismo depósito).
+- **feat(demv):** **Depósitos Express** ahora **diagnostica el "Error de Red"** al guardar: el `.fail()` discrimina por status HTTP (0 = red/timeout/abortado · 403 = sesión/nonce o WAF · 5xx = servidor), lo loguea en consola y aclara que el depósito **NO** se registró; el `$.ajax` fija `timeout` explícito (v3.21).
+- **feat(orders):** El **modal unificado** de la columna Información permite **editar la Guía** (v7.11): se guarda en `shipping_postcode` —el campo principal que busca Depósitos Express— con precarga postcode→fallback `_hpos_ardxoz_woo_numero_guia`.
+- **docs(complementos):** PLUGIN.md de `finanzas-ventova`, `demv` y `orders` sincronizados con el código.
+
 ## v2.3.0
 - **feat(orders):** Editor **en modal unificado** de la columna Información (v7.10) — el click en la celda abre un modal que edita de una vez **Forma de Envío, Costo de Envío, Forma de Pago** (solo pasarelas habilitadas) y **Notas del Cliente**, todo pre-cargado, y guarda con un único AJAX. Se quitaron los lápices/editores sueltos.
 - **feat(orders):** La **Guía** se movió a la primera columna (debajo del nº de pedido, arriba de la fecha); las **Notas del Cliente** se muestran solo si el pedido las tiene.
