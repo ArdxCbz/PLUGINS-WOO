@@ -10,8 +10,9 @@ if (!defined('ABSPATH')) {
  *
  * Flujo (2.6+): registrar → facturar. "Registrar gasto" guarda el registro en estado
  * PENDIENTE (sin tocar Finanzas). El botón "Facturar" de cada registro postea el
- * egreso en la caja elegida y lo pasa a FACTURADO. La Σ por moneda cuenta solo los
- * facturados (lo efectivamente posteado a Finanzas). Nota: a nivel interno el estado
+ * egreso en la caja elegida y lo pasa a FACTURADO. La Σ del tfoot totaliza TODOS los
+ * gastos —facturados o no— en Bs y en $ con su TC promedio (cuánto se lleva
+ * gastado/comprometido en la importación). Nota: a nivel interno el estado
  * facturado sigue siendo `active` y la acción AJAX `iem_validate_purchase_expense`.
  *
  * Moneda dual (2.5+): se llenan dos cualquiera de los tres campos (Bs, $, TC) y el
@@ -23,7 +24,6 @@ if (!defined('ABSPATH')) {
  * @var array  $ic_accounts   lista de cajas [id,name,currency,symbol,is_base,default_rate]
  * @var array  $ic_types      motivos activos
  * @var array  $ic_expenses   gastos de la compra (pending + active)
- * @var array  $ic_totals     totales por moneda (solo validados)
  * @var float  $ic_usd_rate   TC USD por defecto (Bs/$)
  * @var int    $ic_purchase_id id de la compra (cae a $f_id si no se pasó)
  * @var string $ajax_nonce
@@ -32,14 +32,12 @@ $ic_available   = $ic_available   ?? false;
 $ic_accounts    = $ic_accounts    ?? [];
 $ic_types       = $ic_types       ?? [];
 $ic_expenses    = $ic_expenses    ?? [];
-$ic_totals      = $ic_totals      ?? [];
 $ic_usd_rate    = $ic_usd_rate    ?? 0.0;
 $ic_purchase_id = (int) ($ic_purchase_id ?? ($f_id ?? 0));
 
 // Mapa account_id => meta (para mostrar la caja de cada gasto).
 $ic_acc_map = [];
 foreach ($ic_accounts as $a) { $ic_acc_map[(int) $a['id']] = $a; }
-$ic_fmt_total = function ($t) { return $t['symbol'] . ' ' . number_format((float) $t['total'], 2, '.', ','); };
 // Formatea $ / TC con hasta 6 decimales, sin ceros sobrantes ('' si es 0).
 $ic_fmt6 = function ($v) {
     $v = (float) $v;
@@ -47,9 +45,9 @@ $ic_fmt6 = function ($v) {
     $s = number_format($v, 6, '.', '');
     return (strpos($s, '.') !== false) ? rtrim(rtrim($s, '0'), '.') : $s;
 };
-// TC promedio ponderado (Σ Bs ÷ Σ $) de los gastos facturados de la compra. Se
-// muestra como un dato más al final de la línea de Σ por moneda.
-$ic_tc_avg = IEM_Import_Costs::tc_weighted_average($ic_purchase_id);
+// Totales de TODOS los gastos (facturados o no): total en Bs, total en $ y TC
+// promedio ponderado (Σ Bs ÷ Σ $). Se muestra en el tfoot de la tabla.
+$ic_totals = IEM_Import_Costs::expense_grand_totals($ic_purchase_id);
 ?>
 <h2 style="margin-top:24px;">Gastos de importación</h2>
 <div class="iem-card" style="padding:14px 16px;" id="iem-exp-panel"
@@ -191,14 +189,17 @@ $ic_tc_avg = IEM_Import_Costs::tc_weighted_average($ic_purchase_id);
             </tbody>
             <tfoot>
                 <tr>
-                    <th colspan="2" style="text-align:right;">Σ Gastos facturados por moneda:</th>
+                    <th colspan="2" style="text-align:right;">Σ Totales de Gastos:</th>
                     <th colspan="5" style="text-align:left;font-family:monospace;" id="iem-exp-sum">
                         <?php
-                        $parts = [];
-                        foreach ($ic_totals as $t) { $parts[] = $ic_fmt_total($t); }
-                        $sum_txt = empty($parts) ? '—' : implode('  ·  ', $parts);
-                        if ((float) ($ic_tc_avg['tc'] ?? 0) > 0) {
-                            $sum_txt .= '  ·  TC prom. ' . number_format((float) $ic_tc_avg['tc'], 4, '.', ',') . ' Bs/$';
+                        if ((int) ($ic_totals['count'] ?? 0) === 0) {
+                            $sum_txt = '—';
+                        } else {
+                            $sum_txt = 'Bs ' . number_format((float) ($ic_totals['bob'] ?? 0), 2, '.', ',')
+                                     . '  ·  $ ' . number_format((float) ($ic_totals['usd'] ?? 0), 2, '.', ',');
+                            if ((float) ($ic_totals['tc'] ?? 0) > 0) {
+                                $sum_txt .= '  ·  TC prom. ' . number_format((float) $ic_totals['tc'], 4, '.', ',') . ' Bs/$';
+                            }
                         }
                         echo esc_html($sum_txt);
                         ?>
@@ -271,16 +272,14 @@ $ic_tc_avg = IEM_Import_Costs::tc_weighted_average($ic_purchase_id);
         });
     } catch(e) {}
 
-    // Σ por moneda (solo validados); al final, el TC promedio ponderado. Desde recon.
+    // Totales de TODOS los gastos (facturados o no): Bs, $ y TC promedio. Desde recon.
     function applyRecon(recon){
         if (!recon || !$expSum) return;
-        var totals = recon.totals || [];
-        var txt = totals.length
-            ? totals.map(function(t){ return t.symbol + ' ' + fmt(t.total); }).join('  ·  ')
-            : '—';
-        var a = recon.tc_avg;
-        if (a && Number(a.tc) > 0) {
-            txt += '  ·  TC prom. ' + Number(a.tc).toFixed(4) + ' Bs/$';
+        var t = recon.totals || {};
+        if (!Number(t.count)) { $expSum.textContent = '—'; return; }
+        var txt = 'Bs ' + fmt(t.bob) + '  ·  $ ' + fmt(t.usd);
+        if (Number(t.tc) > 0) {
+            txt += '  ·  TC prom. ' + Number(t.tc).toFixed(4) + ' Bs/$';
         }
         $expSum.textContent = txt;
     }

@@ -113,51 +113,26 @@ class IEM_Import_Costs
     }
 
     /**
-     * Σ de gastos activos de la compra, AGRUPADA POR MONEDA (no se consolida).
+     * Totales de TODOS los gastos de la compra —facturados o no (status active +
+     * pending)— en ambas monedas, con el TC promedio ponderado. Suma los
+     * equivalentes `amount_bob` y `amount_usd` de cada registro (no el monto nativo
+     * por moneda) para dar el gasto total de la importación en Bs y en $, y su TC
+     * efectivo: como tc_i = bob_i / usd_i, el promedio ponderado por $ es
+     * Σ(bob_i) / Σ(usd_i) = total en Bs ÷ total en $.
      *
-     * @return array Lista ordenada de ['currency','symbol','total'].
-     */
-    public static function totals_by_currency($purchase_id)
-    {
-        global $wpdb;
-        $t = IEM_Schema::table('purchase_expenses');
-        $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT fin_currency AS currency, COALESCE(SUM(amount),0) AS total
-             FROM $t WHERE purchase_id = %d AND status = 'active'
-             GROUP BY fin_currency ORDER BY fin_currency ASC",
-            (int) $purchase_id
-        ), ARRAY_A) ?: [];
-
-        $out = [];
-        foreach ($rows as $r) {
-            $cur = (string) ($r['currency'] ?: 'BOB');
-            $out[] = [
-                'currency' => $cur,
-                'symbol'   => self::currency_symbol($cur),
-                'total'    => round((float) $r['total'], 2),
-            ];
-        }
-        return $out;
-    }
-
-    /**
-     * TC promedio PONDERADO POR MONTO de los gastos facturados (active) de la
-     * compra. Pondera cada TC por su monto: como tc_i = bob_i / usd_i, el promedio
-     * ponderado por usd es Σ(tc_i·usd_i) / Σ(usd_i) = Σ(bob_i) / Σ(usd_i). Es decir,
-     * el TC efectivo de toda la importación = total en Bs ÷ total en $.
-     *
-     * Solo cuentan los gastos con monto $ y TC > 0 (los que tienen ambas patas);
-     * un gasto puramente en Bs sin equivalente en $ no aporta al TC.
+     * A diferencia de la vieja Σ por moneda del monto nativo, aquí SÍ entran los
+     * gastos pendientes (aún no posteados a Finanzas): es la vista de cuánto se
+     * lleva gastado/comprometido en la importación, no solo lo ya facturado.
      *
      * @return array ['bob'=>float, 'usd'=>float, 'tc'=>float, 'count'=>int]
      */
-    public static function tc_weighted_average($purchase_id)
+    public static function expense_grand_totals($purchase_id)
     {
         global $wpdb;
         $t = IEM_Schema::table('purchase_expenses');
         $row = $wpdb->get_row($wpdb->prepare(
             "SELECT COALESCE(SUM(amount_bob),0) AS bob, COALESCE(SUM(amount_usd),0) AS usd, COUNT(*) AS n
-             FROM $t WHERE purchase_id = %d AND status = 'active' AND amount_usd > 0 AND tc > 0",
+             FROM $t WHERE purchase_id = %d AND status IN ('active','pending')",
             (int) $purchase_id
         ), ARRAY_A) ?: [];
 

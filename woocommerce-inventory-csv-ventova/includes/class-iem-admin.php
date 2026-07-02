@@ -944,7 +944,6 @@ class IEM_Admin
                 $ic_accounts    = IEM_Import_Costs::accounts();
                 $ic_types       = IEM_Import_Costs::types(true);
                 $ic_expenses    = IEM_Import_Costs::get_for_purchase($id);
-                $ic_totals      = IEM_Import_Costs::totals_by_currency($id);
                 $ic_usd_rate    = class_exists('FIN_Currencies') ? (float) FIN_Currencies::rate('USD') : 0.0;
                 include IEM_PLUGIN_DIR . 'templates/admin-purchase-detail.php';
                 return;
@@ -957,7 +956,6 @@ class IEM_Admin
             $ic_accounts    = IEM_Import_Costs::accounts();          // cajas activas con moneda
             $ic_types       = IEM_Import_Costs::types(true);         // motivos activos
             $ic_expenses    = IEM_Import_Costs::get_for_purchase($id);
-            $ic_totals      = IEM_Import_Costs::totals_by_currency($id);
             // 2.5+: TC USD por defecto (Bs por $) para pre-llenar el campo cuando la
             // caja elegida es en Bs (y así calcular el equivalente en $).
             $ic_usd_rate    = class_exists('FIN_Currencies') ? (float) FIN_Currencies::rate('USD') : 0.0;

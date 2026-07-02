@@ -247,12 +247,11 @@ class IEM_Ajax
 
     // ── Gastos de importación de la compra (3.36+) ─────────────────────────
 
-    /** Totales (informativos) por moneda de una compra, junto a cada operación. */
+    /** Totales (informativos) de una compra —facturados o no—, junto a cada operación. */
     private static function expense_recon($purchase_id)
     {
         return [
-            'totals' => IEM_Import_Costs::totals_by_currency((int) $purchase_id),
-            'tc_avg' => IEM_Import_Costs::tc_weighted_average((int) $purchase_id),
+            'totals' => IEM_Import_Costs::expense_grand_totals((int) $purchase_id),
         ];
     }
 
