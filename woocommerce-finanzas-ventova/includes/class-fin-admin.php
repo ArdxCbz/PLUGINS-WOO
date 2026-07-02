@@ -200,11 +200,25 @@ class FIN_Admin
         if (!in_array($orderby, $allowed_orderby, true)) { $orderby = 'movement_date'; }
         $order = (isset($_GET['order']) && strtoupper((string) $_GET['order']) === 'ASC') ? 'ASC' : 'DESC';
 
-        $query_args = ['limit' => 500, 'orderby' => $orderby, 'order' => $order];
+        // Paginación del listado (50 por página; WP usa 'paged' por convención).
+        $per_page = 50;
+
+        $filter_args = ['orderby' => $orderby, 'order' => $order];
         foreach (['account_id', 'category_id', 'type', 'currency', 'from', 'to'] as $k) {
-            if (!empty($filter[$k])) $query_args[$k] = $filter[$k];
+            if (!empty($filter[$k])) $filter_args[$k] = $filter[$k];
         }
-        if ($filter['search'] !== '') $query_args['search'] = $filter['search'];
+        if ($filter['search'] !== '') $filter_args['search'] = $filter['search'];
+
+        // El total del filtro (sin límite) decide cuántas páginas hay; se calcula
+        // antes de paginar para poder acotar 'paged' a un rango válido.
+        $filtered_totals = FIN_Movements::filtered_totals($filter_args);
+        $total_items = (int) $filtered_totals['count'];
+        $total_pages = max(1, (int) ceil($total_items / $per_page));
+
+        $paged = isset($_GET['paged']) ? (int) $_GET['paged'] : 1;
+        $paged = min(max(1, $paged), $total_pages);
+
+        $query_args = array_merge($filter_args, ['limit' => $per_page, 'offset' => ($paged - 1) * $per_page]);
 
         $movements      = FIN_Movements::query($query_args);
         // Una sola consulta de cuentas: el mapa (todas, para nombrar el histórico,
@@ -226,8 +240,7 @@ class FIN_Admin
         $account_motivos = FIN_Accounts::motivos_map();
 
         // ── Control de saldos en el historial ──
-        // Resumen del conjunto filtrado (ingresos/egresos/neto, sin límite).
-        $filtered_totals = FIN_Movements::filtered_totals($query_args);
+        // (filtered_totals/total_items/total_pages ya se calcularon arriba, antes de paginar)
         // Saldo general corrido por movimiento (id => total acumulado).
         $running_general = FIN_Movements::running_general_map();
         // Saldos por cuenta al corte de fecha (filtro 'to'; si vacío = actual).

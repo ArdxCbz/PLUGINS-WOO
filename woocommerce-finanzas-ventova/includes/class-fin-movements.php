@@ -497,7 +497,7 @@ class FIN_Movements
      * Consulta movimientos con filtros para el listado y los exports.
      *
      *   $args: account_id, category_id, type, from (Y-m-d), to (Y-m-d),
-     *          search (en description), limit
+     *          search (en description), limit, offset (paginación)
      */
     /**
      * Construye el WHERE de filtros del listado/totales. Devuelve [where[], params[]].
@@ -558,11 +558,15 @@ class FIN_Movements
         $order_sql = ($orderby === 'id') ? "id $order" : "$orderby $order, id $order";
 
         // limit por defecto 500; un limit <= 0 explícito = sin límite (exports).
-        $limit = array_key_exists('limit', $args) ? (int) $args['limit'] : 500;
+        $limit  = array_key_exists('limit', $args) ? (int) $args['limit'] : 500;
+        $offset = isset($args['offset']) ? max(0, (int) $args['offset']) : 0;
         $sql = "SELECT * FROM $t WHERE " . implode(' AND ', $where)
              . " ORDER BY $order_sql";
         if ($limit > 0) {
             $sql .= " LIMIT " . $limit;
+            if ($offset > 0) {
+                $sql .= " OFFSET " . $offset;
+            }
         }
         $sql = $params ? $wpdb->prepare($sql, ...$params) : $sql;
         return $wpdb->get_results($sql, ARRAY_A) ?: [];

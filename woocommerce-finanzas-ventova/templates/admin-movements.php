@@ -14,6 +14,10 @@ if (!defined('ABSPATH')) {
  * @var array  $cats_egreso    Categorías activas nature=egreso.
  * @var array  $currencies     Catálogo de monedas [code => ['symbol','name','rate']].
  * @var array  $filter         Filtros actuales.
+ * @var int    $paged          Página actual del listado (1-based).
+ * @var int    $per_page       Movimientos por página.
+ * @var int    $total_items    Total de movimientos que coinciden con el filtro.
+ * @var int    $total_pages    Total de páginas según $total_items / $per_page.
  * @var string $nonce
  * @var string $base_url       admin-post.php
  * @var string $flash_msg
@@ -469,6 +473,28 @@ $flash_labels = [
                 </tbody>
             </table>
             </div><?php // /.fin-table-scroll ?>
+
+            <?php if ($total_pages > 1):
+                // Paginación con estilo propio (mismo look que DEMV: botones
+                // redondeados centrados). 'base' con %#% se sustituye por el número
+                // de página; sin 'add_args' toma la URL actual (ya trae todos los
+                // filtros/orden del form GET), solo se reemplaza 'paged'.
+                $pagination_links = paginate_links([
+                    'base'      => add_query_arg('paged', '%#%'),
+                    'format'    => '',
+                    'prev_text' => '«',
+                    'next_text' => '»',
+                    'total'     => $total_pages,
+                    'current'   => $paged,
+                    'end_size'  => 1,
+                    'mid_size'  => 2,
+                ]);
+            ?>
+                <div class="fin-pagination">
+                    <?php echo $pagination_links; ?>
+                    <span class="fin-pagination__info"><?php echo esc_html(number_format_i18n($total_items) . ' movimiento' . ($total_items === 1 ? '' : 's')); ?></span>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>

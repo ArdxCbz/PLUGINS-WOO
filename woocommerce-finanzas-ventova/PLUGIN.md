@@ -13,7 +13,7 @@ de resultados).
 - **Moneda:** Bolivianos (Bs/BOB), única. Helper global `fin_money()`.
 - **Dependencia:** WooCommerce activo (gate en `plugins_loaded`). **Opcionales (guardadas por `class_exists`):** plugin de Inventario (CMV desde el Kardex) y plugin **DEMV** (retención IBEX 7% en el Estado de Resultados, y resolución de la **sucursal** de cada pedido para dividir el pago IBEX — `get_orders_taxonomies()`/`SUCURSALES`); si faltan, esos valores se muestran en 0 y el pago IBEX cae al bucket `SIN SUCURSAL`.
 
-> Estado: **v2.13 — en desarrollo.** (2.13: el **ingreso por depósito** ya no se
+> Estado: **v2.14 — en desarrollo.** (2.13: el **ingreso por depósito** ya no se
 > registra desde el objeto `$order` en memoria que llega por los hooks, sino que
 > lee el monto y la fecha del depósito **directo de la BD** (`persisted_meta()` →
 > HPOS `wc_orders_meta` por la clave actual `_hpos_ardxoz_woo_*`; `postmeta` solo si
@@ -30,7 +30,13 @@ de resultados).
 > es un check-then-act, así que sin lock dos disparos concurrentes —doble clic /
 > reintento simultáneo del mismo depósito— podrían leer ambos `already=0` y
 > registrar el total dos veces; con el lock, la 2.ª petición espera a que la 1.ª
-> commitee y ve delta 0.)
+> commitee y ve delta 0.) (2.14: el **Historial de movimientos** ahora pagina
+> —50 por página vía `LIMIT`/`OFFSET` en `FIN_Movements::query()`— en vez de
+> mostrar un tope fijo de 500 filas sin navegación; el total de páginas sale de
+> `filtered_totals()` (ya corría sin límite para el resumen) y `paged` se acota
+> a ese rango antes de paginar. Los saldos corridos —`running_general_map()`,
+> `balances_as_of()`— no se tocan: siguen sobre el ledger completo, no el
+> recorte de la página.)
 > (2.12: `posted_amount_for_ref()` ahora cuenta
 > solo los movimientos **vigentes** —excluye anulados (`reversed_at`) y contrasientos
 > (`reverses_id`)—; así, **anular** un ingreso de depósito baja el neto vigente y la
@@ -115,7 +121,7 @@ Define el helper global `fin_money($amount)`.
 
 ### Plantillas (`templates/`)
 
-- `admin-movements.php` — forms ingreso/egreso + transferencia + listado filtrable (encabezados ordenables) con **control de saldos**: barra de resumen del filtro (ingresos/egresos/neto), **saldos por cuenta al corte** de la fecha 'hasta', y dos columnas por fila — **Saldo cuenta** (`balance_after`) y **Saldo general** (acumulado del ledger, `FIN_Movements::running_general_map()`). Anular + export. Helpers: `filtered_totals()`, `balances_as_of()`, `running_general_map()` (**2.3+** ambos por moneda). **2.3+:** badges/saldos/resumen por moneda, filtro por moneda, campo de **TC** en ingreso/egreso de cuentas no base, traspaso con TC + vista previa del destino, y equivalente en Bs informativo por fila.
+- `admin-movements.php` — forms ingreso/egreso + transferencia + listado filtrable (encabezados ordenables) con **control de saldos**: barra de resumen del filtro (ingresos/egresos/neto), **saldos por cuenta al corte** de la fecha 'hasta', y dos columnas por fila — **Saldo cuenta** (`balance_after`) y **Saldo general** (acumulado del ledger, `FIN_Movements::running_general_map()`). Anular + export. Helpers: `filtered_totals()`, `balances_as_of()`, `running_general_map()` (**2.3+** ambos por moneda). **2.3+:** badges/saldos/resumen por moneda, filtro por moneda, campo de **TC** en ingreso/egreso de cuentas no base, traspaso con TC + vista previa del destino, y equivalente en Bs informativo por fila. **2.15+:** paginación server-side (`paginate_links`, preserva filtros/orden) con el look de DEMV — botones redondeados centrados vía `.fin-pagination` (ya no el `.tablenav` de WP).
 - `admin-accounts.php` — total tesorería **por moneda** + CRUD cuentas (form lateral con selector de **moneda** —bloqueado si la cuenta ya tiene movimientos— + listado con columna Moneda y toggle).
 - `admin-shipping.php` — pestaña **Egresos de envío**: (1) panel **courier por día** (editable, guardar/validar → un egreso por pedido, `handle_validate_shipping_day`) y (2) panel **IBEX por mes** — cada mes muestra una **tabla por sucursal** (pedidos/total/estado) con un botón **Validar y registrar por sucursal** → un egreso por sucursal (`handle_validate_ibex_month`, recibe `month`+`sucursal`); sucursal sin categoría aparece como "Sin categoría" (no validable); meses legado (esquema anterior) se muestran bloqueados con su egreso único. `render_shipping` provee ambos.
 - `admin-reports.php` — chips selector de reporte + filtros de fecha + tabla + export. **2.3+:** Flujo de caja y Gastos por categoría se muestran en **sub-tablas por moneda**. En **Estado de resultados** muestra el botón **Imprimir (carta)** e incluye el partial `income-statement.php`.
@@ -125,7 +131,7 @@ Define el helper global `fin_money($amount)`.
 
 ### Assets
 
-- `assets/css/admin.css` — utilidades `.fin-*` (cards, filter-bar, status, chips, meta, num). Colores/fuente centralizados en tokens `:root` (`--fin-ok`, `--fin-err`, `--fin-accent`…). Renombrado 1:1 desde `.iem-*` de Inventario. Se encola solo en `toplevel_page_ventova-finanzas`.
+- `assets/css/admin.css` — utilidades `.fin-*` (cards, filter-bar, status, chips, meta, num). **2.15+:** `.fin-pagination` (botones redondeados centrados para el markup de `paginate_links`, look DEMV). Colores/fuente centralizados en tokens `:root` (`--fin-ok`, `--fin-err`, `--fin-accent`…). Renombrado 1:1 desde `.iem-*` de Inventario. Se encola solo en `toplevel_page_ventova-finanzas`.
 - `assets/js/admin.js` — JS de admin encolado (sin jQuery): filtro de motivos por tipo∩cuenta (lee `data-motivos` del select de cuenta), toggle de naturaleza en Config, y **guard anti-doble-submit** en todo form POST. Encolado solo en la página del plugin.
 - `assets/css/print-report.css` — estilos de la **vista de impresión** del Estado de Resultados: `@page { size: letter }`, cabecera/documento centrado, botones ocultos en `@media print`. Se enlaza directo desde `print-report.php` (no se encola). Los estilos del cuerpo del estado viven en el `<style>` del partial.
 

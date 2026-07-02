@@ -111,6 +111,58 @@
     -webkit-overflow-scrolling: touch;
 }
 
+/* ── Paginación (historial de movimientos) ────────────────────────── */
+/* Botones redondeados centrados; estiliza el markup de paginate_links()
+   (.page-numbers, .current, .dots, .prev/.next) fuera del .tablenav de WP. */
+.fin-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 12px 0;
+    padding: 8px;
+}
+.fin-pagination .page-numbers {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid var(--fin-border);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--fin-accent);
+    font-size: 13px;
+    line-height: 1;
+    text-decoration: none;
+    transition: all .15s;
+}
+.fin-pagination a.page-numbers:hover {
+    background: #f0f0f1;
+    border-color: #8c8f94;
+}
+.fin-pagination .page-numbers.current {
+    background: var(--fin-accent);
+    border-color: var(--fin-accent);
+    color: #fff;
+    font-weight: 600;
+    cursor: default;
+}
+.fin-pagination .page-numbers.dots {
+    min-width: auto;
+    padding: 0 4px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--fin-muted);
+}
+.fin-pagination__info {
+    margin-left: 8px;
+    font-size: 13px;
+    color: #646970;
+}
+
 /* ── Registro de Movimientos: badges de saldo por cuenta ──────────── */
 .fin-cash-badges {
     display: flex;
