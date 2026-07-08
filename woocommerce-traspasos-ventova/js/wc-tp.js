@@ -2,11 +2,65 @@ jQuery(function ($) {
     console.log('✅ WC-TP.js cargado');
 
     let transferList = [];
-    let productData = [];
     let editItems = [];
     let editTransferId = 0;
     let editOrigenSlug = '';
     let editTipo = 'productos';
+
+    // Cachés id→fila de los resultados del buscador Select2 (para recuperar
+    // name/sku/stock al seleccionar, ya que Select2 solo conserva id/text).
+    let searchCache = {};
+    let editSearchCache = {};
+
+    // ═══ BUSCADOR SELECT2 DE VARIACIONES (mismo patrón que el form de compras) ═══
+    // Crea un <select> con typeahead que consulta wc_tp_search_products acotado a
+    // una sucursal origen (y opcionalmente categoría). Reemplaza la tabla de
+    // checkboxes con tope de 50 por búsqueda server-side por nombre o SKU.
+    function makeVariationSelect($el, getOrigen, getCat, cache, placeholder) {
+        if (typeof jQuery.fn.selectWoo !== 'function' && typeof jQuery.fn.select2 !== 'function') {
+            return setTimeout(function () {
+                makeVariationSelect($el, getOrigen, getCat, cache, placeholder);
+            }, 60);
+        }
+        const method = jQuery.fn.selectWoo ? 'selectWoo' : 'select2';
+        $el[method]({
+            placeholder: placeholder,
+            minimumInputLength: 2,
+            allowClear: true,
+            width: '100%',
+            language: {
+                inputTooShort: function () { return 'Escribe al menos 2 caracteres…'; },
+                noResults: function () { return 'Sin resultados en esta sucursal'; },
+                searching: function () { return 'Buscando…'; }
+            },
+            ajax: {
+                url: wcTp.ajax_url,
+                type: 'POST', // el handler lee $_POST (como el resto del plugin); Select2 usa GET por defecto
+                dataType: 'json',
+                delay: 250,
+                data: function (params) {
+                    return {
+                        action: 'wc_tp_search_products',
+                        nonce: wcTp.nonce,
+                        origen: getOrigen(),
+                        categoria: getCat ? getCat() : '',
+                        term: params.term || ''
+                    };
+                },
+                processResults: function (res) {
+                    if (!res || !res.success) return { results: [] };
+                    const rows = (res.data && res.data.rows) || [];
+                    return {
+                        results: rows.map(function (r) {
+                            cache[String(r.id)] = r;
+                            return { id: String(r.id), text: r.text };
+                        })
+                    };
+                },
+                cache: true
+            }
+        });
+    }
 
     // ═══ TABS ═══
     $('.wc-tp-tabs .nav-tab').on('click', function (e) {
@@ -18,68 +72,62 @@ jQuery(function ($) {
         $('.wc-tp-tab-content[data-tab="' + tab + '"]').show();
     });
 
-    // ═══ FILTRAR ═══
-    $('#tp_filtrar').on('click', () => {
+    // ═══ BUSCADOR + AGREGAR (paso 2) ═══
+    const $tpSearch = $('#tp_product_search');
+    makeVariationSelect(
+        $tpSearch,
+        () => $('#tp_origen').val(),
+        () => $('#tp_cat').val(),
+        searchCache,
+        'Buscar producto por nombre o SKU…'
+    );
+
+    // El buscador se habilita solo con una sucursal origen elegida.
+    function syncSearchEnabled() {
         const origen = $('#tp_origen').val();
-        const cat = $('#tp_cat').val();
-        if (!origen) return alert('Selecciona una sucursal origen');
+        $tpSearch.prop('disabled', !origen).trigger('change.select2');
+        $('#tp_add_feedback').text(
+            origen
+                ? 'Escribe para buscar productos de esta sucursal.'
+                : 'Selecciona primero la sucursal origen.'
+        );
+    }
+    // Cambiar origen/categoría invalida la selección y la caché actual.
+    // IMPORTANTE: se vacía EN EL SITIO (no `searchCache = {}`), porque el closure
+    // de makeVariationSelect capturó esta misma referencia; reasignarla dejaría a
+    // processResults escribiendo en un objeto y al botón Agregar leyendo otro.
+    function clearObj(o) { for (const k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) delete o[k]; } }
+    function resetSearchSelection() {
+        $tpSearch.val(null).trigger('change');
+        clearObj(searchCache);
+    }
+    $('#tp_origen').on('change', () => { resetSearchSelection(); syncSearchEnabled(); });
+    $('#tp_cat').on('change', resetSearchSelection);
+    syncSearchEnabled();
 
-        $.post(wcTp.ajax_url, {
-            action: 'wc_tp_get_products',
-            nonce: wcTp.nonce,
-            origen: origen,
-            categoria: cat
-        }, res => {
-            const $body = $('#tp_resultados tbody').empty();
-            if (!res.success) return alert('Error: ' + res.data.message);
-            if (!res.data.rows.length) {
-                return $body.append('<tr><td colspan="5" style="text-align:center;color:#777;">— No hay variaciones —</td></tr>');
-            }
-            productData = res.data.rows;
-            res.data.rows.forEach(r => {
-                $body.append(`
-                    <tr>
-                        <td><input type="checkbox" name="productos[]" value="${r.id}"></td>
-                        <td>${r.name}</td>
-                        <td>${r.stock}</td>
-                        <td>
-                            <input type="number" class="tp_qty_input" name="qty[${r.id}]" min="1" max="${r.stock}" style="width:70px">
-                        </td>
-                        <td></td>
-                    </tr>
-                `);
-            });
-        }, 'json');
-    });
-
-    // ═══ AGREGAR ═══
     $('#tp_agregar').on('click', () => {
-        $('#tp_resultados tbody tr').each(function () {
-            const $tr = $(this);
-            const $chk = $tr.find('input[type=checkbox]');
-            if (!$chk.is(':checked')) return;
-            const id = $chk.val();
-            const qty = parseInt($tr.find('.tp_qty_input').val()) || 0;
-            if (qty < 1) return;
+        const origen = $('#tp_origen').val();
+        if (!origen) return alert('Selecciona la sucursal origen');
+        const id = $tpSearch.val();
+        if (!id) return alert('Busca y selecciona un producto');
+        const row = searchCache[String(id)];
+        if (!row) return alert('Vuelve a seleccionar el producto');
+        const qty = parseInt($('#tp_qty').val()) || 0;
+        if (qty < 1) return alert('Indica una cantidad válida');
+        if (qty > row.stock) return alert(`La cantidad supera el stock disponible (${row.stock})`);
+        if (transferList.some(i => i.id == id)) return alert('Ese producto ya está en la lista');
 
-            const product = productData.find(r => r.id == id);
-            if (product) {
-                if (transferList.some(i => i.id == id)) {
-                    alert(`El producto ${product.name} ya está en la lista.`);
-                    return;
-                }
-                transferList.push({
-                    id: id,
-                    name: product.name,
-                    qty: qty,
-                    stock: product.stock,
-                    sku: product.sku
-                });
-            }
+        transferList.push({
+            id: String(id),
+            name: row.name,
+            qty: qty,
+            stock: row.stock,
+            sku: row.sku
         });
         renderTransferList();
-        $('#tp_resultados input[type=checkbox]').prop('checked', false);
-        $('#tp_resultados .tp_qty_input').val('');
+        resetSearchSelection();
+        $('#tp_qty').val(1);
+        $('#tp_add_feedback').text('✓ Agregado. Busca otro producto o continúa al paso 3.');
     });
 
     function renderTransferList() {
@@ -206,6 +254,9 @@ jQuery(function ($) {
 
                 $('#tp_edit_id_display').text('#' + d.id);
                 $('#tp_edit_guia').val(d.guia);
+                $('#tp_edit_origen_name').text(d.origen_name || d.origen);
+                // Ocultar el área de búsqueda al reabrir; se despliega con su botón.
+                $('#tp_edit_search_area').hide();
 
                 if (isDesc) {
                     $('#tp_edit_section_productos').hide();
@@ -301,36 +352,38 @@ jQuery(function ($) {
         $(this).closest('.tp_modal_overlay').hide();
     });
 
-    // ═══ BÚSQUEDA EN MODAL EDIT ═══
+    // ═══ BÚSQUEDA EN MODAL EDIT (Select2 acotado al origen del traspaso) ═══
+    let editSearchInit = false;
+    function ensureEditSearch() {
+        if (editSearchInit) return;
+        const $sel = $('#tp_edit_product_search');
+        makeVariationSelect(
+            $sel,
+            () => editOrigenSlug,   // la sucursal origen fija del traspaso editado
+            null,
+            editSearchCache,
+            'Buscar producto por nombre o SKU…'
+        );
+        $sel.on('select2:select', function (e) {
+            const id = e.params.data.id;
+            const row = editSearchCache[String(id)];
+            if (!row) return;
+            if (editItems.some(it => it.id == id)) {
+                alert('Ese producto ya está en la lista');
+            } else {
+                editItems.push({ id: String(id), name: row.name, qty: 1, sku: row.sku });
+                renderEditItems();
+            }
+            $sel.val(null).trigger('change');
+        });
+        editSearchInit = true;
+    }
+
     $('#tp_edit_add_item_btn').on('click', () => {
         $('#tp_edit_search_area').toggle();
-        $('#tp_edit_search_input').focus();
-    });
-
-    $('#tp_edit_search_btn').on('click', () => {
-        const term = $('#tp_edit_search_input').val();
-        if (term.length < 3) return alert('Ingresa al menos 3 caracteres');
-        $.post(wcTp.ajax_url, {
-            action: 'wc_tp_search_products',
-            nonce: wcTp.nonce,
-            origen: editOrigenSlug, term
-        }, res => {
-            const $ul = $('#tp_edit_search_results').empty();
-            if (!res.success) return alert(res.data.message);
-            if (!res.data.rows.length) return $ul.append('<li>Sin resultados</li>');
-            res.data.rows.forEach(r => {
-                const $li = $(`<li><span>[${r.sku}] ${r.name} <em>(Stock: ${r.stock})</em></span> <button class="button button-small">Agregar</button></li>`);
-                $li.find('button').on('click', () => {
-                    if (editItems.some(it => it.id == r.id)) {
-                        alert('Ya está en la lista');
-                    } else {
-                        editItems.push({ id: r.id, name: r.name, qty: 1, sku: r.sku });
-                        renderEditItems();
-                    }
-                });
-                $ul.append($li);
-            });
-        }, 'json');
+        if ($('#tp_edit_search_area').is(':visible')) {
+            ensureEditSearch();
+        }
     });
 
     // ═══ IMPRIMIR ═══

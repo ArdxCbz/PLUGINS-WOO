@@ -1,7 +1,7 @@
 # Woo Traspasos de Producto Ventova
 
 - **Slug:** `woocommerce-traspasos-ventova` (archivo principal `woo-traspasos-producto.php`)
-- **Versión:** 4.7 (schema `wc_tp_version = '1.5.0'`)
+- **Versión:** 4.10 (schema `wc_tp_version = '1.5.0'`, sin cambios de BD)
 - **Autor:** Ardx
 - **Requiere:** WooCommerce (no declara compat HPOS; no toca pedidos, opera sobre stock de variaciones + tabla propia)
 - **Prefijos:** clases `WC_TP_*` · tabla `wp_wc_tp_history` · option `wc_tp_version` · nonce `wc_tp_nonce` · AJAX `wc_tp_*` · página `wc-traspasos`
@@ -22,11 +22,11 @@ propio con flujo `En Curso → Recibido`, costo/método de envío y pago. Expone
 | `includes/class-wc-tp-config.php` | **Fuente única** de constantes: slugs de sucursal (`sucursal-cbba-stock`/`sucursal-scz-stock`), nombres legibles y métodos de envío válidos (`IBEX`, `ENCOMIENDA`). |
 | `includes/class-wc-tp-install.php` | Crea/actualiza la tabla `wp_wc_tp_history` (`dbDelta` + `ensure_columns_exist` columna por columna). Gate por `wc_tp_version` en `plugins_loaded`. |
 | `includes/class-wc-tp-mappings.php` | Helper `map_sucursal($slug)` → nombre legible (delega a Config). Placeholder para hooks futuros. |
-| `includes/class-wc-tp-admin.php` | Submenú **WooCommerce → Traspasos de Producto** (`wc-traspasos`). Encola JS/CSS solo en su pantalla y localiza `wcTp` (ajax_url + nonce). Carga el template. |
-| `includes/class-wc-tp-ajax.php` | Núcleo transaccional: buscar variaciones, crear/editar traspaso, cambiar estado. Toda la lógica de movimiento de stock (`_apply_movement`, `_revert_movement`, `_find_variation_in_branch`). |
+| `includes/class-wc-tp-admin.php` | Submenú **WooCommerce → Traspasos de Producto** (`wc-traspasos`). Encola JS/CSS solo en su pantalla y localiza `wcTp` (ajax_url + nonce). **v4.8+:** también encola `wc-enhanced-select` + estilos `select2`/`woocommerce_admin_styles` para el buscador Select2 (mismo patrón que el form de compras de IEM). Carga el template. |
+| `includes/class-wc-tp-ajax.php` | Núcleo transaccional: buscar variaciones, crear/editar traspaso, cambiar estado. Toda la lógica de movimiento de stock (`_apply_movement`, `_revert_movement`, `_find_variation_in_branch`). **v4.8+:** `_search_variations()` va por SQL directo (busca por título del padre **o** `_sku`, acotado a `attribute_pa_sucursal = origen`, opcional `product_cat`, LIMIT 30) y devuelve `text` listo para Select2; reemplaza al `WP_Query` con tope de 50 y búsqueda solo por título. |
 | `includes/class-wc-tp-csv-exporter.php` | Export CSV de un traspaso individual (`wc_tp_export_csv`). Distingue filas BIENES vs PRODUCTOS. |
 | `includes/class-wc-tp-api.php` | **API pública estática** para integraciones. `query()` (filtros+paginación+sumas), `get()`, `set_costo_envio()`, `set_metodo_envio()`, `mark_pago_envio()`, `get_sucursales()`, `get_metodos_envio()`. |
-| `templates/admin-interface.php` | UI con pestañas Productos/Bienes, filtros, tabla de historial (últimos 50) y modales. |
+| `templates/admin-interface.php` | UI con pestañas Productos/Bienes, tabla de historial (últimos 50) y modales. **v4.8+:** el paso 2 (elegir productos) usa un **buscador Select2** acotado a la sucursal origen (nombre/SKU) + cantidad + Agregar, en vez de la tabla de checkboxes; el modal de edición usa el mismo buscador. |
 | `css/wc-tp.css`, `js/wc-tp.js` | Frontend de la página de administración. |
 
 ## Tabla de BD personalizada
@@ -78,7 +78,8 @@ usa `origen`** (el pago de envío sale de la sucursal de origen).
 - `admin_enqueue_scripts` → JS/CSS solo en `woocommerce_page_wc-traspasos`.
 
 **AJAX (`wp_ajax_*`, todos `manage_woocommerce` + nonce `wc_tp_nonce`):**
-- `wc_tp_get_products`, `wc_tp_search_products` — buscar variaciones por sucursal/categoría/término.
+- `wc_tp_search_products` — buscar variaciones por sucursal (+ categoría/término opcionales). **v4.8+:** alimenta el buscador **Select2** del paso 2 y el del modal de edición (typeahead por nombre o SKU). Solo exige `origen`.
+- `wc_tp_get_products` — **legado** (v4.8+): quedó sin uso en la UI al reemplazar la tabla de checkboxes por el Select2; el endpoint sigue registrado y funcional.
 - `wc_tp_transfer` — crear traspaso.
 - `wc_tp_edit_transfer` — editar (revierte y reaplica stock si cambian items).
 - `wc_tp_update_status` — cambiar `En Curso`↔`Recibido` (mueve stock a/desde destino).

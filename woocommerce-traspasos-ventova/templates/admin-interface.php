@@ -36,7 +36,7 @@ $rows = $wpdb->get_results(
 
         <div class="wc-tp-card">
             <div class="wc-tp-card-header">
-                <h2><span class="step-num">1</span> Filtrar stock en sucursal Origen</h2>
+                <h2><span class="step-num">1</span> Sucursal de origen</h2>
             </div>
             <div class="wc-tp-card-body">
                 <div class="wc-tp-flex">
@@ -52,7 +52,7 @@ $rows = $wpdb->get_results(
                         </select>
                     </label>
                     <label>
-                        <span class="wc-tp-lbl">Categoría</span>
+                        <span class="wc-tp-lbl">Categoría (opcional)</span>
                         <select id="tp_cat" name="categoria">
                             <option value="">— todas —</option>
                             <?php foreach ($cats as $c): ?>
@@ -62,31 +62,35 @@ $rows = $wpdb->get_results(
                             <?php endforeach; ?>
                         </select>
                     </label>
-                    <button id="tp_filtrar" class="button">🔍 Filtrar</button>
                 </div>
+                <p class="wc-tp-help wc-tp-mt">
+                    El buscador de abajo mostrará solo variaciones con existencia en esta sucursal.
+                    Puedes buscar por nombre o SKU.
+                </p>
             </div>
         </div>
 
         <div class="wc-tp-card">
             <div class="wc-tp-card-header">
-                <h2><span class="step-num">2</span> Selecciona y carga a la lista</h2>
+                <h2><span class="step-num">2</span> Buscar y agregar productos</h2>
             </div>
             <div class="wc-tp-card-body">
-                <table id="tp_resultados" class="widefat striped">
-                    <thead>
-                        <tr>
-                            <th style="width:30px"></th>
-                            <th>Producto</th>
-                            <th style="width:80px">Stock</th>
-                            <th style="width:90px">Cantidad</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-                <button id="tp_agregar" class="button wc-tp-mt">
-                    ➕ Agregar seleccionados
-                </button>
+                <div class="wc-tp-flex wc-tp-search-row">
+                    <label class="wc-tp-flex-grow">
+                        <span class="wc-tp-lbl">Producto</span>
+                        <select id="tp_product_search" style="width:100%"></select>
+                    </label>
+                    <label>
+                        <span class="wc-tp-lbl">Cantidad</span>
+                        <input type="number" id="tp_qty" min="1" value="1" style="width:90px">
+                    </label>
+                    <button id="tp_agregar" class="button button-primary">➕ Agregar</button>
+                </div>
+                <p style="margin:8px 0 0;">
+                    <span id="tp_add_feedback" style="font-size:12px;color:#666;">
+                        Selecciona primero la sucursal origen.
+                    </span>
+                </p>
             </div>
         </div>
 
@@ -327,11 +331,13 @@ $rows = $wpdb->get_results(
                 </table>
                 <button id="tp_edit_add_item_btn" class="button wc-tp-mt">➕ Agregar producto (buscar)</button>
                 <div id="tp_edit_search_area" style="display:none;">
-                    <div class="wc-tp-flex">
-                        <input type="text" id="tp_edit_search_input" placeholder="Buscar producto (mín. 3 caracteres)…" class="wc-tp-flex-grow">
-                        <button id="tp_edit_search_btn" class="button">Buscar</button>
-                    </div>
-                    <ul id="tp_edit_search_results"></ul>
+                    <label class="wc-tp-block" style="margin-top:0;">
+                        <span class="wc-tp-lbl">Buscar producto en <span id="tp_edit_origen_name">origen</span></span>
+                        <select id="tp_edit_product_search" style="width:100%"></select>
+                    </label>
+                    <p style="margin:8px 0 0;font-size:12px;color:#666;">
+                        Busca por nombre o SKU; al seleccionar se añade a la lista de arriba.
+                    </p>
                 </div>
             </div>
 

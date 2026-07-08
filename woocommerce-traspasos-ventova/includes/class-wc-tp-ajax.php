@@ -53,66 +53,100 @@ class WC_TP_Ajax
 
         $origen = sanitize_text_field($_POST['origen'] ?? '');
         $term = sanitize_text_field($_POST['term'] ?? '');
+        $cat_id = intval($_POST['categoria'] ?? 0);
 
-        if (empty($origen) || empty($term)) {
-            wp_send_json_error(['message' => 'Faltan parámetros']);
+        if (empty($origen)) {
+            wp_send_json_error(['message' => 'Selecciona la sucursal origen']);
         }
 
-        $rows = self::_search_variations($origen, $term);
+        $rows = self::_search_variations($origen, $term, $cat_id);
         wp_send_json_success(['rows' => $rows]);
     }
 
     /**
-     * Helper interno para buscar variaciones en una sucursal.
+     * Busca variaciones de una sucursal por nombre (título del padre) o SKU.
+     *
+     * Alimenta el buscador Select2 del paso 2 y el del modal de edición. Va
+     * directo a SQL para poder buscar por SKU (`_sku` en postmeta, que WP_Query
+     * `s` no cubre) además del nombre, acotando a `attribute_pa_sucursal = origen`
+     * para que solo aparezcan las variaciones válidas del traspaso. Reemplaza al
+     * WP_Query con tope fijo de 50 y búsqueda solo por título.
+     *
+     * @param string $sucursal_slug Slug de la sucursal origen (obligatorio).
+     * @param string $search_term   Texto a buscar en nombre del padre o SKU.
+     * @param int    $cat_id        Categoría (product_cat) opcional para refinar.
+     * @return array<int,array{id:int,name:string,sku:string,stock:int,text:string}>
      */
     private static function _search_variations($sucursal_slug, $search_term = '', $cat_id = 0)
     {
-        $args = [
-            'post_type' => 'product_variation',
-            'posts_per_page' => 50, // Limite para rendimiento
-            'meta_query' => [
-                [
-                    'key' => 'attribute_pa_sucursal',
-                    'value' => $sucursal_slug,
-                    'compare' => '=',
-                ],
-            ],
-        ];
+        global $wpdb;
 
-        if ($cat_id) {
-            $parents = get_posts([
-                'post_type' => 'product',
-                'posts_per_page' => -1,
-                'fields' => 'ids',
-                'tax_query' => [['taxonomy' => 'product_cat', 'terms' => $cat_id]],
-            ]);
-            if (empty($parents))
-                return [];
-            $args['post_parent__in'] = $parents;
+        $sucursal_slug = trim((string) $sucursal_slug);
+        if ($sucursal_slug === '') {
+            return [];
         }
 
-        if ($search_term) {
-            $args['s'] = $search_term;
+        $limit = 30;
+
+        // La sucursal se filtra en el JOIN (primer %s); los demás placeholders
+        // van en orden de aparición en el string para $wpdb->prepare posicional.
+        $sql = "SELECT DISTINCT p.ID
+                FROM {$wpdb->posts} p
+                INNER JOIN {$wpdb->postmeta} suc
+                    ON suc.post_id = p.ID AND suc.meta_key = 'attribute_pa_sucursal' AND suc.meta_value = %s
+                INNER JOIN {$wpdb->posts} parent
+                    ON parent.ID = p.post_parent
+                LEFT JOIN {$wpdb->postmeta} sku
+                    ON sku.post_id = p.ID AND sku.meta_key = '_sku'";
+        $params = [$sucursal_slug];
+
+        if ($cat_id > 0) {
+            $sql .= " INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = parent.ID
+                      INNER JOIN {$wpdb->term_taxonomy} tt
+                          ON tt.term_taxonomy_id = tr.term_taxonomy_id AND tt.taxonomy = 'product_cat'";
         }
 
-        $q = new WP_Query($args);
+        $sql .= " WHERE p.post_type = 'product_variation' AND p.post_status = 'publish'";
+
+        if ($cat_id > 0) {
+            $sql .= " AND tt.term_id = %d";
+            $params[] = $cat_id;
+        }
+
+        if ($search_term !== '') {
+            $like = '%' . $wpdb->esc_like($search_term) . '%';
+            $sql .= " AND (parent.post_title LIKE %s OR sku.meta_value LIKE %s)";
+            $params[] = $like;
+            $params[] = $like;
+        }
+
+        $sql .= " ORDER BY parent.post_title ASC LIMIT %d";
+        $params[] = $limit;
+
+        $ids = $wpdb->get_col($wpdb->prepare($sql, $params));
+
         $rows = [];
-        while ($q->have_posts()) {
-            $q->the_post();
-            $var = wc_get_product(get_the_ID());
+        foreach ($ids as $vid) {
+            $var = wc_get_product((int) $vid);
+            if (!$var) {
+                continue;
+            }
             $stock = $var->get_stock_quantity();
-            // Mostrar incluso si no tiene stock (para saber que existe), pero no permitir seleccionar si stock <= 0 logicamente en JS
-            if ($stock === null)
+            if ($stock === null) {
                 $stock = 0;
+            }
+            $sku  = (string) $var->get_sku();
+            $name = $var->get_name(); // Nombre completo con atributos (incluye sucursal/color)
+            $text = ($sku !== '' ? "[{$sku}] " : '') . $name . ' · Stock: ' . (int) $stock;
 
             $rows[] = [
-                'id' => $var->get_id(),
-                'name' => $var->get_name(), // Nombre completo con atributos
-                'stock' => $stock,
-                'sku' => $var->get_sku(),
+                'id'    => $var->get_id(),
+                'name'  => $name,
+                'sku'   => $sku,
+                'stock' => (int) $stock,
+                'text'  => $text,
             ];
         }
-        wp_reset_postdata();
         return $rows;
     }
 
@@ -132,6 +166,12 @@ class WC_TP_Ajax
         $destino = sanitize_text_field($_POST['destino'] ?? '');
         $guia = sanitize_text_field($_POST['guia'] ?? '');
         $estado = sanitize_text_field($_POST['estado'] ?? 'En Curso');
+        // Solo se permiten los dos estados del flujo interno. Cualquier otro
+        // valor dejaría el traspaso atascado (update_status solo transita
+        // 'En Curso' <-> 'Recibido').
+        if (!in_array($estado, ['En Curso', 'Recibido'], true)) {
+            $estado = 'En Curso';
+        }
         $descripcion = isset($_POST['descripcion'])
             ? sanitize_textarea_field(wp_unslash($_POST['descripcion']))
             : '';
@@ -310,7 +350,7 @@ class WC_TP_Ajax
         if ($current_estado === $new_estado)
             wp_send_json_success(); // Sin cambios
 
-        $items = json_decode($row['items'], true);
+        $items = json_decode($row['items'] ?? '[]', true) ?: [];
         $origen = $row['origen'];
         $destino = $row['destino'];
 
@@ -426,8 +466,15 @@ class WC_TP_Ajax
             // Verificar que pertenezca a la sucursal origen (opcional pero recomendable)
             // $sucursal = $product->get_attribute('pa_sucursal'); 
 
-            $current_stock = $product->get_stock_quantity();
-            if ($it['qty'] > $current_stock) {
+            // Si la variación no gestiona stock, get_stock_quantity() devuelve
+            // null; tratamos ese caso como error explícito en vez de un mensaje
+            // con "Disponible: " vacío (con IEM esto ya lo cubre managing_stock()).
+            if (!$product->managing_stock()) {
+                throw new Exception("La variación «{$it['name']}» no gestiona stock; actívalo en WooCommerce antes de traspasar.");
+            }
+
+            $current_stock = (int) $product->get_stock_quantity();
+            if ((int) $it['qty'] > $current_stock) {
                 throw new Exception("Stock insuficiente para {$it['name']}. Disponible: $current_stock, Solicitado: {$it['qty']}");
             }
         }

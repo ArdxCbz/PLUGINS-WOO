@@ -339,6 +339,24 @@
     font-size: 13px;
 }
 
+/* ─── Buscador Select2 de variaciones ─── */
+/* El dropdown de Select2 se adjunta al <body>; su z-index por defecto (1051)
+   queda por debajo del overlay del modal de edición (9999). Lo elevamos para
+   que el desplegable sea visible al agregar productos desde el modal. */
+.select2-container--open {
+    z-index: 10001;
+}
+/* Altura pareja con el resto de inputs del panel. */
+.wc-tp-wrap .select2-container .select2-selection--single {
+    height: 34px;
+}
+.wc-tp-wrap .select2-container .select2-selection--single .select2-selection__rendered {
+    line-height: 32px;
+}
+.wc-tp-wrap .select2-container .select2-selection--single .select2-selection__arrow {
+    height: 32px;
+}
+
 /* ─── Búsqueda en edit modal ─── */
 #tp_edit_search_area {
     background: #f9f9f9;
@@ -346,32 +364,6 @@
     padding: 14px;
     margin-top: 14px;
     border-radius: 4px;
-}
-#tp_edit_search_results {
-    list-style: none;
-    margin: 12px 0 0;
-    padding: 0;
-    max-height: 240px;
-    overflow-y: auto;
-    border: 1px solid #eee;
-    background: #fff;
-    border-radius: 4px;
-}
-#tp_edit_search_results li {
-    padding: 9px 12px;
-    border-bottom: 1px solid #eee;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 13px;
-}
-#tp_edit_search_results li:last-child {
-    border-bottom: none;
-}
-#tp_edit_search_results li em {
-    color: #50575e;
-    font-style: normal;
-    font-size: 11px;
 }
 
 .button-small {

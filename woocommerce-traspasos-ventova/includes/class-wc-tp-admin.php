@@ -31,12 +31,20 @@ class WC_TP_Admin
         if ($hook !== 'woocommerce_page_wc-traspasos') {
             return;
         }
+        // Buscador de productos tipo Select2 (mismo patrón que el form de compras
+        // de Inventario): reutiliza el enhanced-select de WooCommerce para tener
+        // typeahead por nombre/SKU en vez de la tabla de checkboxes con tope de 50.
+        if (function_exists('WC')) {
+            wp_enqueue_script('wc-enhanced-select');
+            wp_enqueue_style('woocommerce_admin_styles');
+            wp_enqueue_style('select2');
+        }
         // Encola el script JavaScript
         wp_enqueue_script(
             'wc-tp-js',
             plugin_dir_url(__DIR__) . 'js/wc-tp.js',
-            ['jquery'],
-            '1.3',
+            ['jquery', 'wc-enhanced-select'],
+            '1.6',
             true
         );
         // Encola estilos CSS para el modal
