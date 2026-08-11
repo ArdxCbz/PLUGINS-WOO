@@ -13,7 +13,162 @@ de resultados).
 - **Moneda:** Bolivianos (Bs/BOB), única. Helper global `fin_money()`.
 - **Dependencia:** WooCommerce activo (gate en `plugins_loaded`). **Opcionales (guardadas por `class_exists`):** plugin de Inventario (CMV desde el Kardex) y plugin **DEMV** (retención IBEX 7% en el Estado de Resultados, y resolución de la **sucursal** de cada pedido para dividir el pago IBEX — `get_orders_taxonomies()`/`SUCURSALES`); si faltan, esos valores se muestran en 0 y el pago IBEX cae al bucket `SIN SUCURSAL`.
 
-> Estado: **v2.14 — en desarrollo.** (2.13: el **ingreso por depósito** ya no se
+> Estado: **v2.22 — en desarrollo.** (2.22: se condensa el texto del formulario de
+> pago de IBEX a una línea. Se conserva la mención del mes de devengo: no tiene campo
+> propio (lo fija el servidor), así que si no se nombra ahí es invisible.)
+> (2.21: **un solo pago, dos fechas.**
+> (a) **UN SOLO EGRESO por mes·sucursal**: pedidos + traspasos. Es una sola factura
+> de IBEX y una sola salida de plata; partirla en dos asientos (como hacía 2.20)
+> obligaba a registrar dos veces lo que se paga una. Cae el mapa de categorías de
+> traspasos (`fin_traspaso_ibex_categories`) — una sucursal, una categoría.
+> (b) **DEVENGO ≠ PAGO** (`accrual_date`, DB 1.4). El egreso se fecha el **día real
+> del pago** (`movement_date`: la caja tiene que ver la plata salir cuando sale, o el
+> saldo de la cuenta miente), pero el **Estado de Resultados lo carga al mes que se
+> está pagando** (`accrual_date` = fin de ese mes), que es el que generó el costo.
+> Sin esto, pagar en julio el envío de junio hacía ver a junio más rentable de lo que
+> fue y a julio, peor. `date_where($from,$to,$alias,$field)` elige la columna: Flujo
+> de caja y Gastos por categoría siguen por `movement_date` (preguntan cuándo salió la
+> plata); el Estado de Resultados va por `accrual_date`. Las dos columnas son iguales
+> en todo movimiento normal —`insert()` copia `movement_date` si no se indica otra, y
+> el backfill 1.4 las igualó en el histórico—, así que ningún otro reporte cambia. El
+> **contrasiento hereda el devengo del original**: anular el pago de junio tiene que
+> descargar junio, no el mes de la anulación. La fecha de devengo **no es un campo del
+> formulario**: la fija el servidor con el mes que se paga.
+> (c) Un egreso de traspasos suelto de la 2.20 **bloquea** el pago unificado de ese
+> mes·sucursal (`FIN_Traspasos::legacy_movement()`) y pide anularlo: si se ignorara,
+> esos traspasos quedarían contados dos veces.)
+> (2.20: **el pago de IBEX estaba incompleto y
+> mal clasificado.** (a) IBEX factura el envío de los **pedidos** Y el de los
+> **traspasos de stock entre sucursales**; Finanzas solo miraba pedidos, así que el
+> egreso mensual salía **subvaluado**. Nueva clase **`FIN_Traspasos`** (dependencia
+> opcional del plugin de Traspasos, vía `WC_TP_API`): agrupa por mes y por
+> **sucursal de ORIGEN** —la que paga— y trata un traspaso **sin costo cargado como
+> pendiente** que bloquea el registro, igual que un pedido sin costo. (b) Van como
+> **egresos separados, con categorías distintas**: el envío de un pedido es costo de
+> la venta; el de un traspaso es **logística interna**. Sumarlos en un solo asiento
+> habría cuadrado la factura y arruinado el Estado de Resultados. El panel los
+> muestra juntos por mes·sucursal y suma la "factura del mes". (c) **El panel ya no
+> asienta**: enlaza al formulario de Movimientos **prellenado**, donde se ve el
+> motivo con el que se va a clasificar el pago y se puede **ajustar el monto a la
+> factura real** antes de tocar el ledger. Se elimina el endpoint
+> `fin_validate_ibex_month` y `FIN_Orders::register_ibex_sucursal()`; el asiento lo
+> hace `handle_save_movement` con la referencia que resuelve el servidor. Ver
+> *Convenciones admin-post → Pago de IBEX*.)
+> (2.19: **rendir es IRREVERSIBLE**. Se elimina
+> por completo la reapertura —botón, endpoint `fin_reopen_cash` y método
+> `FIN_Rendicion::reopen()`— para no dejar un `admin-post` colgado que reabra un
+> período ya firmado. A cambio, `Rendir caja hasta esta fecha` exige **doble
+> validación**: un checkbox de reconocimiento (`confirm_rendir`) que
+> `handle_close_cash()` comprueba **en el servidor** —un `required` de HTML no es
+> garantía y este endpoint cierra un período de forma definitiva— más una
+> confirmación en el navegador con la fecha concreta. Consecuencia asumida: una
+> rendición con fecha equivocada solo se puede deshacer editando la opción
+> `fin_cash_lock` en la BD. El `history` de la opción queda como registro (ya no lo
+> consume ninguna reapertura).
+> **(b) La fecha de corte se elige por GET.** `Rendir hasta` era un campo suelto del
+> POST, pero `render_shipping()` calcula `$lock_cutoff` —y con él los pendientes, el
+> saldo y el *a reponer*— desde `$_GET`: cambiar la fecha no recalculaba nada y el
+> panel seguía mostrando (y bloqueando por) el estado de **hoy**. Ahora el `input`
+> vive en su propio formulario **GET** (recarga el panel; el POST lo lleva como
+> `hidden`), los dos formularios **hermanos** —anidar `<form>` es HTML inválido—. El
+> aviso de bloqueo nombra la fecha concreta y aclara que los pendientes posteriores
+> al corte no cuentan.
+> **(c) `ref_code` de los movimientos por pedido = la GUÍA** (shipping postcode) en
+> vez del número de pedido, que ya va en la descripción (`FIN_Orders::guia_code()`,
+> con fallback al número si no hay guía). La lista de movimientos además solo muestra
+> `[ref]` si no está ya dentro de la descripción.
+> **(d) Se retira la tabla de conciliación** de Movimientos (Saldo inicial / Ingresos
+> / Egresos / Transfer. / Apertura / Neto / Saldo final / Cuadre); queda la barra
+> compacta con el resumen del filtro y el saldo por cuenta al corte.)
+> (2.18: (a) el cierre de caja pasa a llamarse
+> **RENDICIÓN de caja chica** (`FIN_CashLock` → **`FIN_Rendicion`**,
+> `class-fin-rendicion.php`; la clave de opción sigue siendo `fin_cash_lock` para no
+> perder el estado ya guardado). El nombre es el del ciclo contable real que
+> implementa: se **rinde** cuenta de lo gastado hasta una fecha y recién entonces se
+> **repone** el fondo. La UI habla de *rendida hasta*, *a reponer* y *rendir caja*.
+> (b) **`OPT_SHIP_HIDE_BEFORE`** (`fin_order_shipping_hide_before`, 'Y-m-d'):
+> **arranque del panel diario de courier**, calcado de `OPT_IBEX_HIDE_BEFORE`. Los
+> pedidos anteriores al corte se ocultan y **dejan de contar como pendientes**.
+> Resuelve el bloqueo de arranque: los costos de envío **saldados fuera de Finanzas**
+> no se pueden validar (registrarían egresos por gastos ya cubiertos, hundiendo el
+> saldo de la caja) pero, al quedar pendientes, **bloqueaban la rendición para
+> siempre** — un punto muerto. No crea ni borra egresos: solo filtra la vista, en
+> `shipping_day_orders()` y en `FIN_Rendicion::blockers()`. Se configura en
+> *Configuración → Egreso de envío (courier)*.)
+> (2.17: **RENDICIÓN DE CAJA CHICA** (`FIN_Rendicion`,
+> `includes/class-fin-rendicion.php`). No es un arqueo: no hay conteo físico, ni
+> responsable, ni acta, ni tabla — **todo vive en la opción `fin_cash_lock`**
+> (fecha + firma + saldo al corte + historial corto para reabrir). Fija la **línea
+> de partida** de la caja chica. Ciclo: (1) se validan los egresos de envío
+> pendientes hasta el corte —mientras haya pedidos sin validar la caja **miente**,
+> esa plata ya salió pero no está en el ledger—; (2) se **cierra** a esa fecha y el
+> saldo al corte es **la deuda de la caja** = cuánto recargar; (3) la **recarga se
+> registra a mano** en Movimientos con fecha posterior al cierre y por el monto que
+> se decida (es **variable**: a veces hasta dejarla en cero, a veces con colchón —
+> por eso el cierre **no** la calcula ni la registra, solo muestra el saldo); (4)
+> como nada puede entrar antes del cierre, la caja **corre limpia** desde ahí.
+> **La caja chica no se elige**: es la cuenta de `fin_order_shipping_account`
+> (`FIN_Orders::shipping_account_id()`). **Los pendientes bloquean el cierre**
+> (`FIN_Rendicion::blockers()`): cerrar con egresos sin validar deja el saldo inflado
+> y **se recargaría un monto equivocado** — ese es todo el motivo del bloqueo. Un
+> pedido elegible **sin costo cargado también cuenta como pendiente, a propósito**:
+> es la señal de que falta ponerle el monto; si de verdad no lleva costo de envío se
+> le **cambia el método de envío al pedido** y deja de ser elegible (no hay marca de
+> descarte). La ventana que se escanea va **del día siguiente al último cierre hasta
+> el corte** — no es solo optimización: `shipping_day_orders()` hace
+> `wc_get_orders(['limit'=>-1,'return'=>'objects'])` y cargar pedidos en masa agota
+> PHP en producción; el propio cierre acota la ventana. **El candado bloquea TODO
+> movimiento** con fecha ≤ cierre en esa cuenta —egresos, ingresos, transferencias
+> (ambas patas) y **anulaciones**—, no solo egresos: un ingreso antedatado también
+> mueve el saldo al corte e invalida la recarga ya calculada; y anular un movimiento
+> del período cerrado lo sacaría del saldo de forma retroactiva (el contrasiento se
+> fecha hoy, pero el que desaparece es el original). Guards en
+> `FIN_Movements::register()` / `transfer()` / `reverse()`. **Excepción reubicada:**
+> el egreso de envío de un pedido que se vuelve elegible **tarde** (estaba cancelado
+> y se restauró, o le cambiaron el método) con fecha de creación anterior al cierre
+> se registra en el **primer día abierto** con la fecha real anotada en la
+> descripción (`relocate_if_locked()`): rechazarlo perdería plata que sí salió de la
+> caja. UI en la pestaña **Egresos de envío (courier)** —no una pestaña nueva—
+> porque lo que bloquea el cierre son los pendientes que se listan ahí mismo;
+> Movimientos muestra 🔒 en las filas cerradas (sin botón Anular) y avisa cuál es la
+> primera fecha válida. **Rendir es IRREVERSIBLE**: no hay reapertura; de ahí la doble validación.
+> **Sin cambios de schema** (sigue `fin_db_version` 1.3).)
+> (2.16: **los saldos del historial ahora
+> cuadran.** Tres bugs encadenados hacían que el filtro no cerrara nunca:
+> **(a)** la columna *Saldo cuenta* mostraba `balance_after`, que se calcula al
+> **INSERTAR** (`FIN_Accounts::apply_delta()` suma sobre el saldo vigente), pero el
+> ledger va **antedatado** —el depósito lleva la fecha real del depósito, el egreso
+> de envío la de creación del pedido, el IBEX el fin de mes, y el form manual la que
+> elija el usuario—, de modo que un movimiento registrado hoy y fechado la semana
+> pasada arrastra en `balance_after` todo lo insertado antes que él, **incluidos
+> movimientos con fecha posterior**; leída hacia abajo en un listado ordenado por
+> fecha esa columna salta y no cuadra con el saldo al corte (que sí recalcula por
+> fecha). Peor: la columna vecina *Saldo general* **sí** era cronológica, así que dos
+> columnas contiguas usaban dos órdenes distintos. Ahora ambas salen de
+> `running_maps($ids)`, que recalcula el corrido por `(movement_date, id)` **solo
+> para los ids de la página** (antes `running_general_map()` traía el **ledger entero
+> a memoria** en cada render). `balance_after` se conserva en BD y en el CSV como
+> **dato de auditoría del asiento** ("Saldo cuenta (al asentar)"), pero ya no se
+> muestra como saldo corrido. **(b)** `filtered_totals()` sumaba solo
+> `type='ingreso'`/`'egreso'` mientras `COUNT(*)` contaba **todas** las filas: una
+> caja con transferencias mostraba "14 movimientos · Neto X" cuando la caja se había
+> movido X ± transferencias. Ahora el **neto es la Σ FIRMADA por `direction` de todos
+> los tipos** (incluye transferencias y apertura) y se desglosa por moneda **y por
+> cuenta**. **(c)** no existía el **saldo inicial**: sin él no había contra qué
+> cuadrar. Nuevo `balances_before($from)` + **tabla de cuadre** por cuenta y por
+> moneda que verifica la identidad
+> `saldo_inicial + neto = saldo_final` con ✓ / ⚠ y la diferencia. El cuadre solo se
+> evalúa si el filtro **no excluye movimientos** (`filter_is_reconcilable()`: `type`,
+> `category_id` y `search` sí excluyen —una transferencia no tiene categoría, un
+> listado de solo egresos no ve los ingresos—; `account_id`, `currency`, `from` y
+> `to` no): si no, se avisa en vez de fingir un cuadre imposible. Además: las cuentas
+> **inactivas** con saldo o movimientos vuelven a entrar en los totales (antes el
+> template solo pintaba las activas y su saldo desaparecía del total aunque sus
+> movimientos sí sumaran al neto), y un **aviso de descuadre real** compara el saldo
+> denormalizado `accounts.balance` con la suma del ledger. **Schema 1.3**: índices
+> cronológicos **cubrientes** `account_chrono_date` / `currency_chrono_date`
+> `(cuenta|moneda, movement_date, id, direction, amount)` — solo índices, sin
+> backfill.) (2.13: el **ingreso por depósito** ya no se
 > registra desde el objeto `$order` en memoria que llega por los hooks, sino que
 > lee el monto y la fecha del depósito **directo de la BD** (`persisted_meta()` →
 > HPOS `wc_orders_meta` por la clave actual `_hpos_ardxoz_woo_*`; `postmeta` solo si
@@ -106,24 +261,26 @@ Define el helper global `fin_money($amount)`.
 
 | Clase | Archivo | Responsabilidad |
 |---|---|---|
-| `FIN_Schema` | `class-fin-schema.php` | dbDelta de las 3 tablas + versionado por `fin_db_version`. `table($n)`. |
+| `FIN_Schema` | `class-fin-schema.php` | dbDelta de las 3 tablas + versionado por `fin_db_version`. `table($n)`. **DB 1.4:** `accrual_date` en movimientos (+ backfill `= movement_date` en el histórico). |
 | `FIN_Permisos` | `class-fin-permisos.php` | `is_admin()` / `can_admin()` (admin / shop_manager). |
 | `FIN_Currencies` | `class-fin-currencies.php` | **2.3+**: catálogo de monedas (opción `fin_currencies`). Base fija `BOB` (Bs, TC=1, no borrable). `all()`, `get()`, `symbol()`, `name()`, `rate()` (TC por defecto), `save()`, `delete()` (guard base/en-uso), `is_base()`. |
 | `FIN_Accounts` | `class-fin-accounts.php` | CRUD cuentas. `apply_delta()` (mueve saldo), `toggle_active()`. **2.3+**: `currency` por cuenta (bloqueada si `has_movements()`); `treasury_by_currency()` (total por moneda, no consolida), `treasury_total()` (base, compat), `currency_in_use()`. |
 | `FIN_Groups` | `class-fin-groups.php` | Catálogo FIJO de grupos contables (comportamiento P&L horneado). `all()`, `selectable($nature)`, `affects_result()`. |
 | `FIN_Categories` | `class-fin-categories.php` | CRUD motivos (`nature` + `group_key` + `requires_description`). `active_list($nature)`. |
-| `FIN_Movements` | `class-fin-movements.php` | Ledger. `register()`, `register_opening()`, `transfer()`, `reverse()`, `query()`, `exists_for_ref()`. |
+| `FIN_Movements` | `class-fin-movements.php` | Ledger. `register()`, `register_opening()`, `transfer()`, `reverse()`, `query()`, `exists_for_ref()`. **2.16+ (saldos que cuadran):** `filtered_totals()` (neto = Σ firmada por `direction` de **todos** los tipos, desglosado por moneda y por cuenta), `balances_before($from)` (**saldo inicial**), `balances_as_of($to)` (saldo final), `filter_is_reconcilable($args)` (¿el filtro deja movimientos fuera?) y `running_maps($ids)` (saldo corrido **cronológico** de la cuenta y de su moneda, solo para los ids de la página; sustituye a `running_general_map()`, que cargaba el ledger entero). Ojo: `balance_after` es el saldo **al asentar** (orden de inserción) y con el ledger antedatado **no** coincide con el corrido por fecha — es dato de auditoría, no se muestra como saldo. |
 | `FIN_Orders` | `class-fin-orders.php` | Depósito → ingreso **al registrar el depósito** (action DEMV `hawd_deposit_registered`; red de seguridad al completar), por **reconciliación incremental** del delta (`reconcile_deposit_income`), datado por la fecha real del depósito. Costo de envío courier → egreso MANUAL por día (un egreso por pedido), métodos configurables. **2.4+: pago de envío IBEX → egreso MANUAL por MES.** **2.9+ (dividido por sucursal):** `ibex_month_orders()` agrupa los pedidos IBEX por mes **y por sucursal**; `register_ibex_sucursal('Y-m', $sucursal)` registra **un egreso por sucursal** = total de esa sucursal en el mes (ref `order_shipping_ibex`, `ref_id`=AAAAMM·índice, fecha = fin de mes, idempotente por mes·sucursal). Sucursales vía `ibex_sucursales()` (lee `HPOS_Ardxoz_Woo_DEMV_Config::SUCURSALES`, fallback `COCHABAMBA`/`SANTA CRUZ`); categoría por sucursal vía `ibex_categories()` (opción `OPT_IBEX_CATEGORIES` = mapa `[SUCURSAL=>cat_id]`) con `ibex_category_for()` cayendo a la categoría única legado (`OPT_IBEX_CATEGORY`) si no hay mapeo. La sucursal de cada pedido se resuelve en bloque con `order_sucursal_map()` → `HPOS_Ardxoz_Woo_DEMV_Query::get_orders_taxonomies()` (atributo `pa_sucursal`); pedidos sin sucursal → bucket `SIN SUCURSAL`. Meses validados con el esquema previo (`ref_id`=AAAAMM) se detectan como **legado** y se muestran bloqueados. Resto de config `OPT_IBEX_*` (cuenta/métodos default `IBEX`, corte `OPT_IBEX_HIDE_BEFORE`). |
-| `FIN_Reports` | `class-fin-reports.php` | `cash_flow()`, `expenses_by_category()`, `income_statement()`, `sales_from_orders()` (ventas devengadas desde pedidos; **descompone** Ventas brutas = Σ subtotal de productos, Descuentos, Venta neta = bruta − desc, y Envío cobrado como línea aparte; Cobrado/Por cobrar es memo de la Venta neta). **2.3+ (separado por moneda):** `cash_flow()`/`expenses_by_category()` devuelven `[code => rows]`; `income_statement()` es en Bs (filtra ledger a base) y agrega `other_currencies` (ingresos/egresos del ledger en otras monedas, informativo). **2.4+:** `ibex_retention($from,$to)` = retención del 7% no depositada (pedidos IBEX + Contra Entrega del período) reutilizando `HPOS_Ardxoz_Woo_DEMV_Calculator::sum_ibex_cod_retention()`; entra como **gasto operativo real** (suma a `total_gastos`, reduce la utilidad neta). |
+| `FIN_Reports` | `class-fin-reports.php` | **2.21:** `date_where($from,$to,$alias,$field)` elige la fecha que se filtra — Flujo de caja y Gastos por categoría por `movement_date` (**caja**), Estado de Resultados por `accrual_date` (**devengo**). `cash_flow()`, `expenses_by_category()`, `income_statement()`, `sales_from_orders()` (ventas devengadas desde pedidos; **descompone** Ventas brutas = Σ subtotal de productos, Descuentos, Venta neta = bruta − desc, y Envío cobrado como línea aparte; Cobrado/Por cobrar es memo de la Venta neta). **2.3+ (separado por moneda):** `cash_flow()`/`expenses_by_category()` devuelven `[code => rows]`; `income_statement()` es en Bs (filtra ledger a base) y agrega `other_currencies` (ingresos/egresos del ledger en otras monedas, informativo). **2.4+:** `ibex_retention($from,$to)` = retención del 7% no depositada (pedidos IBEX + Contra Entrega del período) reutilizando `HPOS_Ardxoz_Woo_DEMV_Calculator::sum_ibex_cod_retention()`; entra como **gasto operativo real** (suma a `total_gastos`, reduce la utilidad neta). |
 | `FIN_Inventory_Costs` | `class-fin-inventory-costs.php` | **Fachada para el plugin de Inventario (costos de importación).** `register($account_id,$amount,$desc,$ref_id,$ref_code)` → egreso P&L-neutral (categoría de sistema del grupo `compra_inventario`, `ref_table='iem_purchase_cost'`, `skip_balance_check`); `reverse($movement_id)` (contrasiento); `is_available()`. |
+| `FIN_Traspasos` | `class-fin-traspasos.php` | **2.20+**: el envío IBEX de los **traspasos de stock entre sucursales**, que IBEX factura junto con el de los pedidos y que hasta 2.19 **no llegaba a Finanzas** (el egreso mensual salía subvaluado). Lee el plugin de Traspasos por su API pública (`WC_TP_API::query()`, paginada; filas de tabla, no objetos) — dependencia **opcional**: sin él, `available()` es false y el pago sale solo con los pedidos. `month_sucursales($from,$to)` agrupa por mes (`date_created`) y **sucursal = ORIGEN** (lo define el propio plugin: "el pago de envío sale del origen"); un traspaso **sin `costo_envio` cargado es un PENDIENTE** y bloquea el registro del mes·sucursal. **2.21:** el pago es **UNO SOLO** (pedidos + traspasos, ref `order_shipping_ibex`); esta clase solo aporta su mitad del total (`summary()`). `legacy_movement()` detecta el egreso de traspasos **suelto de la 2.20** (`traspaso_shipping_ibex`) para bloquear el pago unificado y evitar contarlos dos veces. |
+| `FIN_Rendicion` | `class-fin-rendicion.php` | **2.17+**: rendición de la **caja chica** (= `FIN_Orders::shipping_account_id()`). Estado en la opción `fin_cash_lock` (sin tabla): `state()`, `locked_until()`, `is_locked($account_id,$date)`, `first_open_date()`, `locked_error()`, `relocate_if_locked()` (egreso automático tardío → primer día abierto), `blockers($cutoff)` (egresos de envío sin validar ≤ corte; ventana acotada por el último cierre), `balance_at($cutoff)` (= la deuda a reponer), `close($cutoff)`. **No hay `reopen()`**: rendir es irreversible (sin método ni endpoint), por eso `handle_close_cash()` exige doble validación (checkbox de reconocimiento comprobado en el SERVIDOR + confirmación en el navegador). |
 | `FIN_CSV` | `class-fin-csv.php` | Streaming CSV (movimientos + reportes), anti formula-injection. |
 | `FIN_Admin` | `class-fin-admin.php` | Menú top-level, dispatcher de pestañas, endpoints admin-post, renderers. |
 
 ### Plantillas (`templates/`)
 
-- `admin-movements.php` — forms ingreso/egreso + transferencia + listado filtrable (encabezados ordenables) con **control de saldos**: barra de resumen del filtro (ingresos/egresos/neto), **saldos por cuenta al corte** de la fecha 'hasta', y dos columnas por fila — **Saldo cuenta** (`balance_after`) y **Saldo general** (acumulado del ledger, `FIN_Movements::running_general_map()`). Anular + export. Helpers: `filtered_totals()`, `balances_as_of()`, `running_general_map()` (**2.3+** ambos por moneda). **2.3+:** badges/saldos/resumen por moneda, filtro por moneda, campo de **TC** en ingreso/egreso de cuentas no base, traspaso con TC + vista previa del destino, y equivalente en Bs informativo por fila. **2.15+:** paginación server-side (`paginate_links`, preserva filtros/orden) con el look de DEMV — botones redondeados centrados vía `.fin-pagination` (ya no el `.tablenav` de WP).
+- `admin-movements.php` — forms ingreso/egreso + transferencia + listado filtrable (encabezados ordenables) con **control de saldos**: resumen del filtro + **tabla de cuadre** por cuenta y por moneda (`Saldo inicial + Ingresos − Egresos [± Transfer. ± Apertura] = Saldo final`, con ✓/⚠ y la diferencia; aviso cuando el filtro excluye movimientos y el cuadre no aplica), y dos columnas por fila — **Saldo cuenta** y **Saldo general**, ambas **cronológicas** (`FIN_Movements::running_maps()`, por `movement_date`; ya **no** `balance_after`). Anular + export. Helpers: `filtered_totals()`, `balances_as_of()`, `running_general_map()` (**2.3+** ambos por moneda). **2.3+:** badges/saldos/resumen por moneda, filtro por moneda, campo de **TC** en ingreso/egreso de cuentas no base, traspaso con TC + vista previa del destino, y equivalente en Bs informativo por fila. **2.15+:** paginación server-side (`paginate_links`, preserva filtros/orden) con el look de DEMV — botones redondeados centrados vía `.fin-pagination` (ya no el `.tablenav` de WP).
 - `admin-accounts.php` — total tesorería **por moneda** + CRUD cuentas (form lateral con selector de **moneda** —bloqueado si la cuenta ya tiene movimientos— + listado con columna Moneda y toggle).
-- `admin-shipping.php` — pestaña **Egresos de envío**: (1) panel **courier por día** (editable, guardar/validar → un egreso por pedido, `handle_validate_shipping_day`) y (2) panel **IBEX por mes** — cada mes muestra una **tabla por sucursal** (pedidos/total/estado) con un botón **Validar y registrar por sucursal** → un egreso por sucursal (`handle_validate_ibex_month`, recibe `month`+`sucursal`); sucursal sin categoría aparece como "Sin categoría" (no validable); meses legado (esquema anterior) se muestran bloqueados con su egreso único. `render_shipping` provee ambos.
+- `admin-shipping.php` — pestaña **Egresos de envío**: (1) panel **courier por día** (editable, guardar/validar → un egreso por pedido, `handle_validate_shipping_day`) y (2) panel **IBEX por mes**. **2.21:** cada mes muestra **una fila por sucursal** — Pedidos (cant./total) + Traspasos (cant./total) = **A pagar**, con el estado del pago. Un solo egreso: es una sola factura de IBEX. El panel **ya no asienta**: el botón **Registrar en Movimientos** es un enlace al formulario prellenado (`FIN_Admin::ibex_source_url($month,$suc)`) — ver *Convenciones admin-post*. El estado no-registrable lo da `FIN_Admin::ibex_block()`, la **única** definición de "registrable" (la comparten panel, formulario y guardado); el panel se la pide con los totales **ya calculados**, porque llamar a `ibex_source()` por fila recargaría los pedidos de cada mes con `wc_get_orders` y agotaría la memoria de PHP en producción. `render_shipping` construye `$ibex_view`.
 - `admin-reports.php` — chips selector de reporte + filtros de fecha + tabla + export. **2.3+:** Flujo de caja y Gastos por categoría se muestran en **sub-tablas por moneda**. En **Estado de resultados** muestra el botón **Imprimir (carta)** e incluye el partial `income-statement.php`.
 - `income-statement.php` — **partial reutilizable** del cuerpo del Estado de Resultados con presentación profesional (conceptos limpios, aclaraciones contables a notas al pie numeradas, importes deductivos entre paréntesis, totales/resultado destacados). Emite su propio `<style id="fin-pl-css">` para verse idéntico en pantalla y en impresión. Lo incluyen `admin-reports.php` y `print-report.php`. **2.3+:** bloque informativo **"Movimientos en otras monedas"** (no consolidado). **2.10+:** la línea **"Compras de inventario"** enlaza al Registro de Movimientos filtrado (`category_id` de costos de importación + `from`/`to`) para ver el detalle por movimiento; en la vista de impresión el enlace es inocuo.
 - `print-report.php` — vista de impresión autónoma del Estado de Resultados en **tamaño carta** (sin chrome de WP), con cabecera (logo de `haw_print_logo_id` si existe, o nombre del sitio) + el partial + botones Imprimir/Cerrar. La sirve `FIN_Admin::handle_print_report()` (endpoint `fin_print_report`) en pestaña nueva.
@@ -140,7 +297,8 @@ Define el helper global `fin_money($amount)`.
 ## Modelo de datos
 
 Tres tablas (`{prefix}fin_*`), versionadas por la opción `fin_db_version`
-(actual `1.2`). NO se borran al desactivar. La 1.1 agrega `group_key` y
+(actual `1.3`; la **1.3** solo agrega los índices cronológicos cubrientes
+`account_chrono_date` / `currency_chrono_date` a `fin_movements` — sin backfill). NO se borran al desactivar. La 1.1 agrega `group_key` y
 `requires_description` a `fin_categories` (dbDelta aditivo + backfill de grupos
 en `maybe_upgrade`). La **1.2 (multi-moneda)** agrega `currency` a `fin_accounts`
 y `currency` + `rate_to_base` a `fin_movements` (dbDelta aditivo; el DEFAULT
@@ -183,12 +341,22 @@ Estado de Resultados.
 cuenta), `rate_to_base` (**2.3+**: TC Bs por unidad capturado al registrar; base
 = 1; informativo/traspasos), `amount` (>0, en la moneda del movimiento),
 `balance_after` (saldo de la cuenta tras
-el movimiento), `description`, `movement_date`, `transfer_id` (une las patas
+el movimiento), `description`, `movement_date` (fecha de **CAJA**: cuándo salió o
+entró la plata), **`accrual_date`** (**1.4+**, fecha de **DEVENGO**: a qué período
+pertenece el hecho económico — igual a `movement_date` salvo que se indique otra;
+la única que difiere hoy es el pago mensual de IBEX, que se paga en un mes y
+devenga en otro), `transfer_id` (une las patas
 de una transferencia), `reverses_id` / `reversed_at` / `reversed_by`
-(contrasiento), `ref_table` / `ref_id` / `ref_code` (traza al origen, p.ej.
-`order_shipping`), `user_id`, `created_at`. Los valores de `ref_table` son
-constantes: `REF_ORDER_DEPOSIT` / `REF_ORDER_SHIPPING` (+ `REF_PURCHASE`,
-legado de la integración con Compras ya retirada).
+(contrasiento; **hereda el `accrual_date` del original**), `ref_table` / `ref_id` /
+`ref_code` (traza al origen, p.ej. `order_shipping`), `user_id`, `created_at`. Los
+valores de `ref_table` son constantes: `REF_ORDER_DEPOSIT` / `REF_ORDER_SHIPPING` /
+`REF_ORDER_IBEX` (+ `REF_TRASPASO_IBEX`, egresos de traspasos sueltos que solo pudo
+generar la 2.20, y `REF_PURCHASE`, legado de la integración con Compras ya retirada).
+
+**Quién usa qué fecha:** Flujo de caja y Gastos por categoría → `movement_date`
+(preguntan cuándo salió la plata). **Estado de Resultados → `accrual_date`**
+(pregunta a qué mes pertenece el gasto). El listado de Movimientos y los saldos
+corridos son caja: `movement_date`.
 
 ---
 
@@ -378,12 +546,43 @@ fallback ACF legacy) si está disponible; método de envío comparado por **tít
   `fin_save_category`, `fin_toggle_category`, `fin_save_account_motivos`,
   `fin_save_order_deposit`, `fin_save_order_shipping`, `fin_save_income_sales`,
   `fin_validate_shipping_day`, `fin_save_order_ibex` (cuenta + categorías por
-  sucursal + métodos + corte) + `fin_validate_ibex_month` (valida **una sucursal**
-  del mes → un egreso por sucursal), `fin_export_report`, `fin_print_report`
-  (vista de impresión en carta del Estado de Resultados), `fin_save_currency`,
-  `fin_delete_currency` (catálogo de monedas en Configuración).
+  sucursal, **de pedidos y de traspasos** + métodos + corte), `fin_export_report`,
+  `fin_print_report` (vista de impresión en carta del Estado de Resultados),
+  `fin_save_currency`, `fin_delete_currency` (catálogo de monedas en Configuración).
 - Cada handler: `require_cap()` → `check_admin_referer()` → acción →
   `redirect_back($tab, ['fin_msg'|'fin_err' => ...])`.
+
+### Pago de IBEX: el panel propone, el formulario asienta (2.20+)
+
+`fin_validate_ibex_month` **ya no existe**. El panel de envíos enlaza a
+`FIN_Admin::ibex_source_url($month, $sucursal)` → el formulario de Movimientos
+prellenado (cuenta, motivo, monto = pedidos + traspasos, fecha del pago,
+descripción); el egreso lo asienta `handle_save_movement` como cualquier otro. Dos
+motivos: el monto se puede **ajustar a la factura real de IBEX** antes de tocar el
+ledger, y el pago queda con el **motivo correcto** (el que lo clasifica en el
+Estado de Resultados) a la vista de quien confirma.
+
+Por la URL viajan **solo tres datos** — `fin_src` (= `ibex`), `fin_month`,
+`fin_suc` —; monto, cuenta, categoría, referencia y **fecha de devengo** los
+**recalcula el servidor** (`FIN_Admin::ibex_source()`) de los dos lados, al pintar
+y al guardar: si viajaran por la URL, el navegador podría dictarle al ledger
+cuánto asentar y en qué grupo contable. `ibex_block()` es la única definición de
+"registrable" (ya registrado / egreso de traspasos suelto de 2.20 / mes legado /
+traspasos sin costo / sin categoría / sin monto): el formulario la usa para
+deshabilitar el botón **y el handler la vuelve a comprobar** — un botón
+deshabilitado no es una validación.
+
+**Las dos fechas (2.21).** `movement_date` = día real del **pago** (sale del
+formulario, editable). `accrual_date` = fin del **mes que se paga** (la impone el
+servidor, no hay campo): es la que usa el Estado de Resultados para cargar el costo
+al mes que lo generó. Ver `FIN_Reports::date_where()`.
+
+Dos relajaciones deliberadas para este flujo (no aplican al alta manual): se
+omite `motivo_allowed()` (la categoría la fija la configuración del pago, no la
+elige el operador) y se usa `skip_balance_check` (hecho consumado: IBEX ya cobró;
+negar el asiento no deshace el cobro, solo esconde la deuda). Para que el JS del
+formulario no reemplace la categoría prellenada por "la primera permitida",
+`render_movements()` la inyecta en el mapa `data-motivos` de esa cuenta.
 - Navegación: `FIN_Admin::tab_url($tab, $extra)` (pestaña por defecto
   `movimientos`, se omite de la URL).
 

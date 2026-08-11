@@ -51,6 +51,16 @@ class FIN_Orders
     const OPT_SHIP_ACCOUNT  = 'fin_order_shipping_account';
     const OPT_SHIP_CATEGORY = 'fin_order_shipping_category';
     const OPT_SHIP_METHODS  = 'fin_order_shipping_methods'; // array de títulos permitidos
+    // Corte 'Y-m-d' elegido por el admin en Configuración: el panel diario muestra
+    // ese día y los posteriores, y OCULTA los anteriores. Es el ARRANQUE del
+    // sistema: los pedidos anteriores se saldaron FUERA de Finanzas (su costo de
+    // envío ya se pagó), así que no hay que registrarles egreso —hacerlo hundiría
+    // el saldo de la caja con gastos ya cubiertos— ni dejarlos como pendientes
+    // eternos, porque los pendientes BLOQUEAN la rendición (FIN_Rendicion) y la
+    // caja no se podría rendir nunca. No crea ni borra egresos: es solo un filtro
+    // de visualización, igual que OPT_IBEX_HIDE_BEFORE.
+    // Vacío = se muestran todos los días (comportamiento por defecto).
+    const OPT_SHIP_HIDE_BEFORE = 'fin_order_shipping_hide_before';
 
     // Pago de costo de envío IBEX → egreso. Registro MANUAL por MES (un egreso
     // mensual = total del costo de envío de los pedidos IBEX del mes).
@@ -237,7 +247,10 @@ class FIN_Orders
                 'movement_date' => self::deposit_date($order),
                 'ref_table'     => FIN_Movements::REF_ORDER_DEPOSIT,
                 'ref_id'        => $order_id,
-                'ref_code'      => $number,
+                // La referencia visible es la GUÍA de envío, no el número de pedido:
+                // el número ya va en la descripción y repetirlo no aporta nada. La
+                // guía sí, y además queda buscable (el filtro busca en ref_code).
+                'ref_code'      => self::guia_code($order),
                 'user_id'       => get_current_user_id(),
             ]);
             // El WP_Error eventual se ignora: el registro financiero no debe romper el
@@ -268,6 +281,29 @@ class FIN_Orders
         return self::valid_account(self::OPT_SHIP_ACCOUNT) > 0
             && self::valid_category(self::OPT_SHIP_CATEGORY, 'egreso') > 0
             && !empty(self::allowed_methods());
+    }
+
+    /**
+     * La CAJA CHICA: la cuenta configurada para el egreso de costo de envío.
+     * Público porque FIN_Rendicion la necesita — la rendición opera sobre esta
+     * cuenta y sobre ninguna otra.
+     *
+     * @return int 0 si no está configurada.
+     */
+    public static function shipping_account_id()
+    {
+        return self::valid_account(self::OPT_SHIP_ACCOUNT);
+    }
+
+    /**
+     * Corte 'Y-m-d' del panel diario de courier (primer día visible): el ARRANQUE
+     * del sistema. Cadena vacía si no hay corte (se muestran todos los días).
+     * Ver OPT_SHIP_HIDE_BEFORE.
+     */
+    public static function ship_hide_before()
+    {
+        $v = (string) get_option(self::OPT_SHIP_HIDE_BEFORE, '');
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) ? $v : '';
     }
 
     /**
@@ -361,6 +397,14 @@ class FIN_Orders
         $methods = self::allowed_methods();
         if (empty($methods)) {
             return [];
+        }
+
+        // Corte de arranque: nunca se miran pedidos anteriores. Los de antes del
+        // corte se saldaron fuera de Finanzas; mostrarlos los dejaría como
+        // pendientes eternos y bloquearían la rendición de la caja para siempre.
+        $hide_before = self::ship_hide_before();
+        if ($hide_before !== '' && $from < $hide_before) {
+            $from = $hide_before;
         }
 
         list($from_ts, $to_ts) = fin_order_range_ts($from, $to);
@@ -499,16 +543,27 @@ class FIN_Orders
         }
 
         $number = (string) $order->get_order_number();
+
+        // El egreso se fecha con la CREACIÓN del pedido. Si esa fecha cae dentro
+        // de un período ya cerrado, el candado lo rechazaría y perderíamos un
+        // egreso real (plata que sí salió de la caja). Pasa con pedidos que se
+        // vuelven elegibles tarde: estaban cancelados y se restauraron, o les
+        // cambiaron el método de envío. Se reubica al primer día abierto dejando
+        // la fecha real anotada en la descripción. Ver FIN_Rendicion.
+        list($date, $note) = FIN_Rendicion::relocate_if_locked($account_id, self::created_date($order));
+
         return FIN_Movements::register([
             'account_id'         => $account_id,
             'type'               => 'egreso',
             'amount'             => $amount,
             'category_id'        => $category_id,
-            'description'        => sprintf('Costo de envío %s pedido #%s', $matched, $number),
-            'movement_date'      => self::created_date($order),
+            'description'        => sprintf('Costo de envío %s pedido #%s', $matched, $number) . $note,
+            'movement_date'      => $date,
             'ref_table'          => FIN_Movements::REF_ORDER_SHIPPING,
             'ref_id'             => $order_id,
-            'ref_code'           => $number,
+            // Igual que en el depósito: la referencia visible es la GUÍA, no el
+            // número de pedido (que la descripción ya trae). Ver guia_code().
+            'ref_code'           => self::guia_code($order),
             'skip_balance_check' => true, // hecho consumado: no bloquear por saldo
             'user_id'            => get_current_user_id(),
         ]);
@@ -608,6 +663,12 @@ class FIN_Orders
             return (int) $pos + 1;
         }
         return 99; // bucket "sin sucursal" / desconocida
+    }
+
+    /** Cuenta de la que sale el pago mensual de IBEX (0 si no está configurada). */
+    public static function ibex_account_id()
+    {
+        return self::valid_account(self::OPT_IBEX_ACCOUNT);
     }
 
     /** ¿Está el panel mensual IBEX operativo? Requiere caja + ≥1 categoría egreso + métodos. */
@@ -858,78 +919,74 @@ class FIN_Orders
     }
 
     /**
-     * Registra el egreso de IBEX de UN mes·sucursal: UN movimiento = suma del
-     * costo de envío de los pedidos IBEX de esa sucursal en el mes. Idempotente
-     * por mes·sucursal (ref_id = AAAAMM·índice). Fecha = último día del mes.
+     * Total y cantidad de pedidos IBEX de UN mes·sucursal.
+     *
+     * Es la fuente de verdad del monto que el panel propone en el formulario de
+     * Movimientos: se recalcula SIEMPRE en el servidor, tanto al pintar el
+     * formulario como al guardarlo. El monto nunca viaja por la URL (sería
+     * confiar en el navegador para escribir en el ledger).
      *
      * @param string $month    'Y-m'
      * @param string $sucursal Nombre de sucursal (MAYÚSCULAS) o IBEX_SUC_NONE.
-     * @return int|WP_Error|0 id del movimiento; 0 si ya existe o total 0.
+     * @return array{total:float,count:int}
      */
-    public static function register_ibex_sucursal($month, $sucursal)
+    public static function ibex_sucursal_summary($month, $sucursal)
     {
         if (!preg_match('/^(\d{4})-(\d{2})$/', (string) $month, $mm)) {
-            return new WP_Error('fin_ibex_month', 'Mes inválido.');
+            return ['total' => 0.0, 'count' => 0];
         }
         $sucursal = strtoupper(trim((string) $sucursal));
-        if ($sucursal === '') {
-            return new WP_Error('fin_ibex_suc', 'Sucursal inválida.');
-        }
 
-        $year      = (int) $mm[1];
-        $mon       = (int) $mm[2];
-        $month_key = self::ibex_month_key($year, $mon);
-
-        // Si el mes ya se registró con el esquema antiguo (un solo egreso del
-        // mes), no se permite además el desglose por sucursal: el mes ya está pago.
-        if (FIN_Movements::exists_for_ref(FIN_Movements::REF_ORDER_IBEX, $month_key)) {
-            return 0;
-        }
-
-        $ref_id = self::ibex_suc_ref_id($month_key, $sucursal);
-        if (FIN_Movements::exists_for_ref(FIN_Movements::REF_ORDER_IBEX, $ref_id)) {
-            return 0; // sucursal de ese mes ya registrada
-        }
-
-        $account_id = self::valid_account(self::OPT_IBEX_ACCOUNT);
-        if ($account_id <= 0) {
-            return new WP_Error('fin_ibex_account', 'No hay una cuenta válida configurada para el pago IBEX.');
-        }
-        $category_id = self::ibex_category_for($sucursal);
-        if ($category_id <= 0) {
-            return new WP_Error('fin_ibex_category', sprintf('No hay categoría egreso configurada para la sucursal %s.', $sucursal));
-        }
-
-        $from = sprintf('%04d-%02d-01', $year, $mon);
+        $from = sprintf('%04d-%02d-01', (int) $mm[1], (int) $mm[2]);
         $to   = date('Y-m-t', strtotime($from));
 
-        $candidates = self::ibex_candidates($from, $to);
-        $total = 0.0; $count = 0;
-        foreach ($candidates as $c) {
+        $total = 0.0;
+        $count = 0;
+        foreach (self::ibex_candidates($from, $to) as $c) {
             if ($c['sucursal'] !== $sucursal) {
                 continue;
             }
             $total += $c['amount'];
             $count++;
         }
-        $total = round($total, 2);
-        if ($total <= 0) {
-            return 0; // nada que registrar para esta sucursal
-        }
+        return ['total' => round($total, 2), 'count' => $count];
+    }
 
-        return FIN_Movements::register([
-            'account_id'         => $account_id,
-            'type'               => 'egreso',
-            'amount'             => $total,
-            'category_id'        => $category_id,
-            'description'        => sprintf('Costo de envío IBEX %s — %s (%d pedido%s)', $month, $sucursal, $count, $count === 1 ? '' : 's'),
-            'movement_date'      => $to . ' 23:59:59',
-            'ref_table'          => FIN_Movements::REF_ORDER_IBEX,
-            'ref_id'             => $ref_id,
-            'ref_code'           => 'IBEX ' . $month . ' ' . $sucursal,
-            'skip_balance_check' => true, // hecho consumado: no bloquear por saldo
-            'user_id'            => get_current_user_id(),
-        ]);
+    /**
+     * Referencia del egreso IBEX de un mes·sucursal (pedidos). La usan el
+     * formulario de Movimientos (para asentar con trazabilidad) y el panel (para
+     * saber si el mes·sucursal ya está validado).
+     *
+     * @return array{table:string,id:int,code:string}
+     */
+    public static function ibex_ref($month, $sucursal)
+    {
+        $suc    = strtoupper(trim((string) $sucursal));
+        $ref_id = 0;
+        if (preg_match('/^(\d{4})-(\d{2})$/', (string) $month, $mm)) {
+            $ref_id = self::ibex_suc_ref_id(self::ibex_month_key((int) $mm[1], (int) $mm[2]), $suc);
+        }
+        return [
+            'table' => FIN_Movements::REF_ORDER_IBEX,
+            'id'    => $ref_id,
+            'code'  => 'IBEX ' . $month . ' ' . $suc,
+        ];
+    }
+
+    /**
+     * ¿El mes se pagó con el esquema LEGADO (un solo egreso del mes, sin
+     * desglose por sucursal)? Entonces el mes ya está pago y no admite egresos
+     * por sucursal.
+     */
+    public static function ibex_month_is_legacy($month)
+    {
+        if (!preg_match('/^(\d{4})-(\d{2})$/', (string) $month, $mm)) {
+            return false;
+        }
+        return FIN_Movements::exists_for_ref(
+            FIN_Movements::REF_ORDER_IBEX,
+            self::ibex_month_key((int) $mm[1], (int) $mm[2])
+        );
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1020,6 +1077,27 @@ class FIN_Orders
             return $raw . ' ' . current_time('H:i:s');
         }
         return self::completed_date($order);
+    }
+
+    /**
+     * Código de referencia del movimiento: la GUÍA de envío del pedido.
+     *
+     * La guía se guarda en el **código postal de envío** del pedido (convención de
+     * Ventova: ese campo no se usa como código postal). Es un dato distinto del
+     * número de pedido y es el que sirve para cotejar contra el courier.
+     *
+     * Antes se guardaba aquí el número de pedido, que la descripción del movimiento
+     * ya trae ("Depósito pedido #40476"), así que el listado mostraba dos veces lo
+     * mismo: `Depósito pedido #40476 [40476]`. Ahora muestra `[123456]` = la guía.
+     *
+     * Si el pedido no tiene guía cargada, se cae al número de pedido (mejor una
+     * referencia redundante que ninguna); el listado, de todos modos, oculta el
+     * `ref_code` cuando ya está contenido en la descripción.
+     */
+    private static function guia_code(WC_Order $order)
+    {
+        $guia = trim((string) $order->get_shipping_postcode());
+        return $guia !== '' ? $guia : (string) $order->get_order_number();
     }
 
     /**

@@ -16,6 +16,14 @@ class FIN_Admin
     const NONCE_FIELD  = '_fin_nonce';
     const PAGE_SLUG    = 'ventova-finanzas';
 
+    /**
+     * Marca del pago mensual de IBEX. El panel ya no asienta el egreso: manda al
+     * formulario de Movimientos con el pago cargado, y ahí se confirma. Por la URL
+     * viajan solo la marca, el mes y la sucursal; el monto, la cuenta, la categoría
+     * y las fechas se recalculan en el servidor de los dos lados.
+     */
+    const SRC_IBEX = 'ibex';
+
     public static function init()
     {
         add_action('admin_menu',            [__CLASS__, 'register_menu']);
@@ -53,7 +61,11 @@ class FIN_Admin
         // Panel diario de egresos de costo de envío (pestaña Egresos de envío).
         add_action('admin_post_fin_validate_shipping_day', [__CLASS__, 'handle_validate_shipping_day']);
         // Panel mensual de pago de envío IBEX (misma pestaña).
-        add_action('admin_post_fin_validate_ibex_month',   [__CLASS__, 'handle_validate_ibex_month']);
+        // (El pago mensual de IBEX ya no tiene endpoint propio: el panel enlaza al
+        // formulario de Movimientos, que asienta el egreso con handle_save_movement.)
+        // Rendición de caja chica (misma pestaña: lo que la bloquea está ahí).
+        // No hay endpoint de reapertura: rendir es definitivo.
+        add_action('admin_post_fin_close_cash',            [__CLASS__, 'handle_close_cash']);
 
         // Reportes.
         add_action('admin_post_fin_export_report',   [__CLASS__, 'handle_export_report']);
@@ -239,16 +251,93 @@ class FIN_Admin
         // Mapa cuenta→motivos permitidos (para filtrar el select de motivo en el form).
         $account_motivos = FIN_Accounts::motivos_map();
 
+        // ── Pago de IBEX que se está confirmando ──
+        // El panel de envíos no asienta: manda aquí con el formulario cargado
+        // (cuenta, categoría, monto, fecha y descripción) para que se revise —y se
+        // ajuste el monto a lo que realmente facturó IBEX— antes de tocar el ledger.
+        $prefill = null;
+        if (isset($_GET['fin_src']) && sanitize_key((string) $_GET['fin_src']) === self::SRC_IBEX) {
+            $prefill = self::ibex_source(
+                isset($_GET['fin_month']) ? (string) $_GET['fin_month']           : '',
+                isset($_GET['fin_suc'])   ? (string) wp_unslash($_GET['fin_suc']) : ''
+            );
+        }
+
+        // La categoría del pago la fija la configuración de IBEX, no los "motivos
+        // permitidos" de la cuenta. Sin esto, el JS del formulario (que oculta los
+        // motivos no permitidos y auto-selecciona el primero visible) cambiaría la
+        // categoría prellenada por otra, y el Estado de Resultados quedaría mal
+        // clasificado justo en el asiento que este flujo existe para clasificar bien.
+        if ($prefill && $prefill['category_id'] > 0) {
+            $aid = (int) $prefill['account_id'];
+            $allowed = isset($account_motivos[$aid]) ? (array) $account_motivos[$aid] : [];
+            if (!in_array($prefill['category_id'], array_map('intval', $allowed), true)) {
+                $allowed[] = $prefill['category_id'];
+                $account_motivos[$aid] = $allowed;
+            }
+        }
+
         // ── Control de saldos en el historial ──
         // (filtered_totals/total_items/total_pages ya se calcularon arriba, antes de paginar)
-        // Saldo general corrido por movimiento (id => total acumulado).
-        $running_general = FIN_Movements::running_general_map();
-        // Saldos por cuenta al corte de fecha (filtro 'to'; si vacío = actual).
-        $cutoff          = $filter['to'];
-        $balances_cutoff = FIN_Movements::balances_as_of($cutoff);
+
+        // Saldos corridos CRONOLÓGICOS (por fecha, no por orden de inserción) de
+        // los movimientos visibles: saldo de la cuenta y saldo general de su
+        // moneda tras cada uno. Solo para los ids de esta página.
+        $running         = FIN_Movements::running_maps(wp_list_pluck($movements, 'id'));
+        $running_account = $running['account'];
+        $running_general = $running['general'];
+
+        // Saldo de cada cuenta al corte de la fecha 'hasta' (vacío = saldo actual).
+        $balances_cutoff = FIN_Movements::balances_as_of($filter['to']);
+
+        // Cuentas que entran en la barra de saldos: la filtrada, o todas las que
+        // muevan dinero. Se incluyen las INACTIVAS con saldo o con movimientos en
+        // el filtro (su histórico sí suma al neto; omitirlas descuadraba el total).
+        if ($filter['account_id']) {
+            $recon_ids = [(int) $filter['account_id']];
+        } else {
+            $recon_ids = [];
+            foreach ($all_accounts as $a) {
+                $aid = (int) $a['id'];
+                if ($filter['currency'] !== ''
+                    && strtoupper((string) $a['currency']) !== strtoupper($filter['currency'])) {
+                    continue;
+                }
+                $moves = isset($filtered_totals['by_account'][$aid])
+                    || !empty($balances_cutoff[$aid]);
+                if ((int) $a['active'] === 1 || $moves) {
+                    $recon_ids[] = $aid;
+                }
+            }
+        }
+        // Filas de cuenta indexadas por id (activas e inactivas) para el cuadre.
+        $accounts_all = [];
+        foreach ($all_accounts as $a) {
+            $accounts_all[(int) $a['id']] = $a;
+        }
+
+        // Chequeo de integridad: el saldo denormalizado (accounts.balance, que es
+        // lo que muestran los badges y valida los egresos) debe coincidir con el
+        // ledger. Si no, hay un descuadre real que ningún filtro va a explicar.
+        $balances_now    = ($filter['to'] === '') ? $balances_cutoff : FIN_Movements::balances_as_of('');
+        $ledger_mismatch = [];
+        foreach ($all_accounts as $a) {
+            $aid  = (int) $a['id'];
+            $diff = round((float) ($balances_now[$aid] ?? 0.0) - (float) $a['balance'], 2);
+            if (abs($diff) >= 0.01) {
+                $ledger_mismatch[$aid] = $diff;
+            }
+        }
 
         // Catálogo de monedas (para el filtro y los campos de TC del form).
         $currencies = FIN_Currencies::all();
+
+        // Cierre de caja chica: el listado marca con 🔒 los movimientos del período
+        // cerrado (no se pueden anular) y el form avisa cuál es la primera fecha
+        // válida. Se cierra desde la pestaña "Egresos de envío (courier)".
+        $cash_lock_account = FIN_Rendicion::account_id();
+        $cash_lock_until   = FIN_Rendicion::locked_until();
+        $cash_lock_open    = FIN_Rendicion::first_open_date();
 
         $nonce     = wp_create_nonce(self::NONCE_ACTION);
         $base_url  = admin_url('admin-post.php');
@@ -284,12 +373,159 @@ class FIN_Admin
         $ibex_methods    = FIN_Orders::ibex_methods();
         $ibex_months     = $ibex_configured ? FIN_Orders::ibex_month_orders($ibex_from, $ibex_to) : [];
 
+        // IBEX también cobra el envío de los TRASPASOS entre sucursales. Es la MISMA
+        // factura y la misma salida de plata que la de los pedidos, así que se paga
+        // con UN SOLO egreso por mes·sucursal: aquí se suman las dos mitades.
+        $ibex_tp_available = FIN_Traspasos::available();
+        $ibex_tp_months    = ($ibex_configured && $ibex_tp_available)
+            ? FIN_Traspasos::month_sucursales($ibex_from, $ibex_to)
+            : [];
+
+        // Vista del panel: mes → sucursal → una sola fila (pedidos + traspasos), con
+        // el estado del pago. Las dos fuentes se leen por separado y se cruzan aquí.
+        $ibex_view        = [];
+        $ibex_blank_month = [
+            'legacy'        => false,
+            'legacy_amount' => null,
+            'legacy_date'   => null,
+            'ped_total'     => 0.0,
+            'ped_count'     => 0,
+            'tp_total'      => 0.0,
+            'tp_count'      => 0,
+            'tp_pending'    => 0,
+            'sucursales'    => [],
+        ];
+        $ibex_blank_suc = [
+            'ped_total' => 0.0, 'ped_count' => 0,
+            'tp_total'  => 0.0, 'tp_count'  => 0, 'tp_pending' => 0,
+        ];
+
+        foreach ($ibex_months as $m => $info) {
+            $ibex_view[$m] = array_merge($ibex_blank_month, [
+                'legacy'        => !empty($info['legacy']),
+                'legacy_amount' => $info['legacy_amount'],
+                'legacy_date'   => $info['legacy_date'],
+                'ped_total'     => (float) $info['total'],
+                'ped_count'     => (int) $info['count'],
+            ]);
+            foreach ($info['sucursales'] as $suc => $s) {
+                $ibex_view[$m]['sucursales'][$suc] = array_merge($ibex_blank_suc, [
+                    'ped_total' => (float) $s['total'],
+                    'ped_count' => (int) $s['count'],
+                ]);
+            }
+        }
+        foreach ($ibex_tp_months as $m => $sucs) {
+            if (!isset($ibex_view[$m])) {
+                // Mes con traspasos pero sin pedidos IBEX: existe igual.
+                $ibex_view[$m] = array_merge($ibex_blank_month, [
+                    'legacy' => FIN_Orders::ibex_month_is_legacy($m),
+                ]);
+            }
+            foreach ($sucs as $suc => $t) {
+                if (!isset($ibex_view[$m]['sucursales'][$suc])) {
+                    $ibex_view[$m]['sucursales'][$suc] = $ibex_blank_suc;
+                }
+                $ibex_view[$m]['sucursales'][$suc]['tp_total']   = (float) $t['total'];
+                $ibex_view[$m]['sucursales'][$suc]['tp_count']   = (int) $t['count'];
+                $ibex_view[$m]['sucursales'][$suc]['tp_pending'] = (int) $t['pending'];
+                $ibex_view[$m]['tp_total']   += (float) $t['total'];
+                $ibex_view[$m]['tp_count']   += (int) $t['count'];
+                $ibex_view[$m]['tp_pending'] += (int) $t['pending'];
+            }
+        }
+
+        // Estado de cada mes·sucursal (¿ya se pagó? ¿qué lo bloquea?). Se calcula con
+        // el MISMO ibex_block() que usa el guardado, para que la pantalla no pueda
+        // contradecir lo que el servidor va a aceptar — pero a partir de los totales
+        // YA calculados arriba. Llamar a ibex_source() por fila volvería a cargar los
+        // pedidos de cada mes (wc_get_orders con objetos), que es exactamente lo que
+        // agota la memoria de PHP en producción.
+        foreach ($ibex_view as $m => &$ibex_v) {
+            ksort($ibex_v['sucursales']);
+            $m_legacy = !empty($ibex_v['legacy']);
+            foreach ($ibex_v['sucursales'] as $suc => &$ibex_s) {
+                $ibex_s['total']       = round($ibex_s['ped_total'] + $ibex_s['tp_total'], 2);
+                $ibex_s['category_id'] = FIN_Orders::ibex_category_for($suc);
+                $ibex_s['movement']    = FIN_Movements::get_by_ref(
+                    FIN_Movements::REF_ORDER_IBEX, FIN_Orders::ibex_ref($m, $suc)['id']
+                );
+                $ibex_s['block'] = self::ibex_block([
+                    'month'        => $m,
+                    'sucursal'     => $suc,
+                    'total'        => $ibex_s['total'],
+                    'tp_pending'   => (int) $ibex_s['tp_pending'],
+                    'category_id'  => (int) $ibex_s['category_id'],
+                    'movement'     => $ibex_s['movement'],
+                    'tp_legacy'    => FIN_Traspasos::legacy_movement($m, $suc),
+                    'month_legacy' => $m_legacy,
+                ]);
+            }
+            unset($ibex_s);
+        }
+        unset($ibex_v);
+        krsort($ibex_view); // meses más recientes primero
+
+        // ── Cierre de caja chica ──
+        // Vive aquí, junto al panel diario, porque lo que bloquea el cierre son
+        // justamente los egresos de envío sin validar: el problema y su solución
+        // quedan en la misma pantalla, sin navegar a otra pestaña.
+        $lock_account = FIN_Rendicion::account();
+        $lock_state   = FIN_Rendicion::state();
+        $lock_until   = FIN_Rendicion::locked_until();
+
+        // Corte propuesto: hoy, o el que el usuario esté tanteando por GET. Llega por
+        // GET (y no como campo suelto del POST) porque los pendientes, el saldo y el
+        // "a reponer" DEPENDEN de esta fecha y hay que recalcularlos al cambiarla:
+        // el panel debe mostrar el estado del corte elegido, no el de hoy.
+        $lock_cutoff = isset($_GET['lock_cutoff']) ? sanitize_text_field((string) $_GET['lock_cutoff']) : '';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $lock_cutoff)) {
+            $lock_cutoff = wp_date('Y-m-d');
+        }
+
+        // Qué impide cerrar a ese corte, y cuál sería el saldo (= la deuda de la
+        // caja, lo que hay que recargar) si se cerrara.
+        $lock_blockers = $lock_account ? FIN_Rendicion::blockers($lock_cutoff) : ['count' => 0, 'total' => 0.0, 'days' => []];
+        $lock_balance  = $lock_account ? FIN_Rendicion::balance_at($lock_cutoff) : 0.0;
+        $lock_can      = $lock_account
+            && (int) $lock_blockers['count'] === 0
+            && $lock_cutoff <= wp_date('Y-m-d')
+            && ($lock_until === '' || $lock_cutoff > $lock_until);
+
         $nonce     = wp_create_nonce(self::NONCE_ACTION);
         $base_url  = admin_url('admin-post.php');
         $flash_msg = isset($_GET['fin_msg']) ? sanitize_text_field((string) $_GET['fin_msg']) : '';
         $flash_err = isset($_GET['fin_err']) ? sanitize_text_field((string) wp_unslash($_GET['fin_err'])) : '';
 
         include FIN_PLUGIN_DIR . 'templates/admin-shipping.php';
+    }
+
+    /**
+     * Rinde la caja chica hasta la fecha indicada (fin_close_cash).
+     *
+     * La rendición es IRREVERSIBLE (no existe reabrir), así que exige doble
+     * validación: el checkbox de reconocimiento se comprueba también aquí, no solo
+     * en el navegador — un `required` de HTML no es una garantía, y este endpoint
+     * cierra un período de forma definitiva.
+     */
+    public static function handle_close_cash()
+    {
+        self::require_cap();
+        self::check_nonce();
+
+        if (empty($_POST['confirm_rendir'])) {
+            self::redirect_back('envios', ['fin_err' => rawurlencode(
+                'Debes confirmar que entiendes que la rendición es irreversible.'
+            )]);
+        }
+
+        $cutoff = isset($_POST['lock_cutoff']) ? sanitize_text_field((string) $_POST['lock_cutoff']) : '';
+        $r      = FIN_Rendicion::close($cutoff);
+
+        if (is_wp_error($r)) {
+            self::redirect_back('envios', ['fin_err' => rawurlencode($r->get_error_message())]);
+        }
+        self::redirect_back('envios', ['fin_msg' => 'cash_closed']);
     }
 
     public static function handle_save_movement()
@@ -300,15 +536,18 @@ class FIN_Admin
         $account_id  = isset($_POST['account_id'])  ? (int) $_POST['account_id']  : 0;
         $category_id = isset($_POST['category_id']) ? (int) $_POST['category_id'] : 0;
 
-        // El motivo debe estar permitido para la cuenta (semántica estricta): una
-        // cuenta sin motivos asignados no puede registrar movimientos manuales.
-        if (!FIN_Accounts::motivo_allowed($account_id, $category_id)) {
-            self::redirect_back('movimientos', ['fin_err' => rawurlencode(
-                'El motivo elegido no está permitido para esta cuenta. Asigna los motivos de la cuenta en Configuración → Motivos permitidos por cuenta.'
-            )]);
+        // ¿Este movimiento confirma un pago mensual de IBEX (pedidos o traspasos)?
+        // La fuente se vuelve a resolver EN EL SERVIDOR: el formulario solo trae
+        // qué mes y qué sucursal, nunca el monto ni la categoría de origen.
+        $src = null;
+        if (isset($_POST['fin_src']) && sanitize_key((string) $_POST['fin_src']) === self::SRC_IBEX) {
+            $src = self::ibex_source(
+                isset($_POST['fin_month']) ? (string) $_POST['fin_month']           : '',
+                isset($_POST['fin_suc'])   ? (string) wp_unslash($_POST['fin_suc']) : ''
+            );
         }
 
-        $r = FIN_Movements::register([
+        $args = [
             'account_id'    => $account_id,
             'type'          => isset($_POST['type'])        ? sanitize_text_field((string) $_POST['type'])        : '',
             'amount'        => isset($_POST['amount'])      ? (float) $_POST['amount']                            : 0,
@@ -316,11 +555,51 @@ class FIN_Admin
             'description'   => isset($_POST['description']) ? (string) wp_unslash($_POST['description'])          : '',
             'movement_date' => isset($_POST['movement_date']) ? sanitize_text_field((string) $_POST['movement_date']) : '',
             'rate'          => isset($_POST['rate'])        ? (float) $_POST['rate']                              : 0,
-        ]);
+        ];
+
+        if ($src) {
+            // Un botón deshabilitado no es una validación: la razón por la que el
+            // panel no dejaba asentar se vuelve a comprobar aquí.
+            if ($src['block'] !== '') {
+                self::redirect_back('movimientos', ['fin_err' => rawurlencode($src['block'])]);
+            }
+
+            // Trazabilidad: el egreso apunta al mes·sucursal que paga. Eso es lo que
+            // vuelve idempotente al panel (deja de ofrecer ese pago) y lo que permite
+            // reconocerlo como registrado.
+            $args['ref_table'] = $src['ref']['table'];
+            $args['ref_id']    = $src['ref']['id'];
+            $args['ref_code']  = $src['ref']['code'];
+
+            // DEVENGO: el gasto pertenece al mes que se está pagando, no al día en
+            // que se pagó. La fecha de caja (movement_date) sí sale del formulario
+            // —se puede corregir el día del pago—, pero el período contable lo fija
+            // el servidor: es lo que hace que el Estado de Resultados cargue el costo
+            // en el mes de las ventas que lo generaron.
+            $args['accrual_date'] = $src['accrual'];
+
+            // Hecho consumado: IBEX ya cobró. Igual que cuando lo asentaba la
+            // automatización, no se bloquea por saldo insuficiente — negar el asiento
+            // no deshace el cobro, solo esconde la deuda.
+            $args['skip_balance_check'] = true;
+        } else {
+            // El motivo debe estar permitido para la cuenta (semántica estricta): una
+            // cuenta sin motivos asignados no puede registrar movimientos manuales.
+            // No aplica al pago de IBEX: ahí la categoría la fija la configuración del
+            // pago (es la que hace correcto el Estado de Resultados), no la elige el
+            // operador, y la cuenta es la que se configuró para esa factura.
+            if (!FIN_Accounts::motivo_allowed($account_id, $category_id)) {
+                self::redirect_back('movimientos', ['fin_err' => rawurlencode(
+                    'El motivo elegido no está permitido para esta cuenta. Asigna los motivos de la cuenta en Configuración → Motivos permitidos por cuenta.'
+                )]);
+            }
+        }
+
+        $r = FIN_Movements::register($args);
         if (is_wp_error($r)) {
             self::redirect_back('movimientos', ['fin_err' => rawurlencode($r->get_error_message())]);
         }
-        self::redirect_back('movimientos', ['fin_msg' => 'mov_ok']);
+        self::redirect_back('movimientos', ['fin_msg' => $src ? 'ibex_ok' : 'mov_ok']);
     }
 
     public static function handle_transfer()
@@ -619,9 +898,10 @@ class FIN_Admin
             'dep_account'  => (int) get_option(FIN_Orders::OPT_DEP_ACCOUNT, 0),
             'dep_category' => (int) get_option(FIN_Orders::OPT_DEP_CATEGORY, 0),
             // Costo de envío (courier) → egreso manual por día (Caja Chica).
-            'ship_account'  => (int) get_option(FIN_Orders::OPT_SHIP_ACCOUNT, 0),
-            'ship_category' => (int) get_option(FIN_Orders::OPT_SHIP_CATEGORY, 0),
-            'ship_methods'  => FIN_Orders::allowed_methods(),
+            'ship_account'     => (int) get_option(FIN_Orders::OPT_SHIP_ACCOUNT, 0),
+            'ship_category'    => (int) get_option(FIN_Orders::OPT_SHIP_CATEGORY, 0),
+            'ship_methods'     => FIN_Orders::allowed_methods(),
+            'ship_hide_before' => FIN_Orders::ship_hide_before(),
             // Pago de envío IBEX → egreso manual por mes (un egreso por sucursal).
             'ibex_account'    => (int) get_option(FIN_Orders::OPT_IBEX_ACCOUNT, 0),
             'ibex_category'   => (int) get_option(FIN_Orders::OPT_IBEX_CATEGORY, 0),
@@ -812,9 +1092,19 @@ class FIN_Admin
             $methods = array_values(array_unique($methods));
         }
 
-        update_option(FIN_Orders::OPT_SHIP_ACCOUNT,  $account,  false);
-        update_option(FIN_Orders::OPT_SHIP_CATEGORY, $category, false);
-        update_option(FIN_Orders::OPT_SHIP_METHODS,  $methods,  false);
+        // Corte de arranque del panel diario ('Y-m-d'): los pedidos anteriores se
+        // saldaron fuera de Finanzas y no deben aparecer como pendientes (si no,
+        // bloquean la rendición de la caja para siempre). Vacío = sin corte.
+        $ship_hide_before = isset($_POST['ship_hide_before'])
+            ? sanitize_text_field((string) $_POST['ship_hide_before']) : '';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $ship_hide_before)) {
+            $ship_hide_before = '';
+        }
+
+        update_option(FIN_Orders::OPT_SHIP_ACCOUNT,     $account,          false);
+        update_option(FIN_Orders::OPT_SHIP_CATEGORY,    $category,         false);
+        update_option(FIN_Orders::OPT_SHIP_METHODS,     $methods,          false);
+        update_option(FIN_Orders::OPT_SHIP_HIDE_BEFORE, $ship_hide_before, false);
         FIN_Orders::flush_recent_methods_cache();
 
         self::redirect_back('config', ['fin_msg' => 'config_saved']);
@@ -829,18 +1119,10 @@ class FIN_Admin
         $account  = isset($_POST['account'])  ? (int) $_POST['account']  : 0;
 
         // Categorías por sucursal: categories[SUCURSAL] = category_id. Solo se
-        // guardan las sucursales conocidas (DEMV/config) con categoría > 0.
+        // guardan las sucursales conocidas (DEMV/config) con categoría > 0. Una sola
+        // categoría por sucursal: pedidos y traspasos se pagan con el mismo egreso.
         $known      = FIN_Orders::ibex_sucursales();
-        $categories = [];
-        if (isset($_POST['categories']) && is_array($_POST['categories'])) {
-            foreach ($_POST['categories'] as $suc => $cid) {
-                $suc = strtoupper(trim((string) wp_unslash($suc)));
-                $cid = (int) $cid;
-                if ($suc !== '' && $cid > 0 && in_array($suc, $known, true)) {
-                    $categories[$suc] = $cid;
-                }
-            }
-        }
+        $categories = self::sucursal_category_map($_POST['categories'] ?? null, $known);
 
         $methods = [];
         if (isset($_POST['methods']) && is_array($_POST['methods'])) {
@@ -866,6 +1148,28 @@ class FIN_Admin
         update_option(FIN_Orders::OPT_IBEX_HIDE_BEFORE, $hide_before, false);
 
         self::redirect_back('config', ['fin_msg' => 'config_saved']);
+    }
+
+    /**
+     * Normaliza un POST `campo[SUCURSAL] = category_id` a un mapa limpio. Solo
+     * sucursales conocidas y categorías > 0.
+     *
+     * @return array<string,int>
+     */
+    private static function sucursal_category_map($raw, array $known)
+    {
+        $out = [];
+        if (!is_array($raw)) {
+            return $out;
+        }
+        foreach ($raw as $suc => $cid) {
+            $suc = strtoupper(trim((string) wp_unslash($suc)));
+            $cid = (int) $cid;
+            if ($suc !== '' && $cid > 0 && in_array($suc, $known, true)) {
+                $out[$suc] = $cid;
+            }
+        }
+        return $out;
     }
 
     /**
@@ -948,35 +1252,153 @@ class FIN_Admin
         self::redirect_back('envios', $extra);
     }
 
+    // ── Pago mensual de IBEX: fuente del movimiento ──────────────────────────
+
     /**
-     * Panel mensual IBEX: guarda los montos editados de los pedidos del mes y/o
-     * valida el mes (registra UN egreso = total del mes). El botón pulsado define
-     * la acción ('do'). El registro es idempotente por mes.
+     * Resuelve el pago de IBEX de UN mes·sucursal y devuelve todo lo que el
+     * formulario necesita — y todo lo que el guardado tiene que volver a comprobar.
+     *
+     * UN SOLO PAGO: pedidos y traspasos van en el MISMO movimiento. Es una sola
+     * factura de IBEX y una sola salida de plata; partirla en dos asientos obligaba
+     * a registrar dos veces lo que se paga una.
+     *
+     * DOS FECHAS, y ahí está el punto fino:
+     *  - `date` (movement_date) = HOY, la fecha real del pago. La caja tiene que ver
+     *    la plata salir cuando sale, o el saldo de la cuenta miente.
+     *  - `accrual` (accrual_date) = fin del mes que se paga. El Estado de Resultados
+     *    tiene que cargar el costo al mes que lo generó —las ventas y traspasos de
+     *    ese mes— o ese mes se vería más rentable de lo que fue, y el mes del pago,
+     *    peor.
+     *
+     * De la URL solo se aceptan DOS datos: mes y sucursal. El monto, la cuenta, la
+     * categoría y las fechas se recalculan aquí, en el servidor, tanto al pintar el
+     * formulario como al guardarlo: si viajaran por la URL, cualquiera podría
+     * dictarle al ledger cuánto asentar y en qué grupo contable.
+     *
+     * @return array|null null si los parámetros no describen un pago válido.
      */
-    public static function handle_validate_ibex_month()
+    public static function ibex_source($month, $sucursal)
     {
-        self::require_cap();
-        self::check_nonce();
+        $month = trim((string) $month);
+        $suc   = strtoupper(trim((string) $sucursal));
 
-        $month    = isset($_POST['month'])    ? sanitize_text_field((string) $_POST['month'])              : '';
-        $sucursal = isset($_POST['sucursal']) ? strtoupper(trim((string) wp_unslash($_POST['sucursal']))) : '';
-
-        $extra = [
-            'ibex_from' => isset($_POST['ibex_from']) ? sanitize_text_field((string) $_POST['ibex_from']) : '',
-            'ibex_to'   => isset($_POST['ibex_to'])   ? sanitize_text_field((string) $_POST['ibex_to'])   : '',
-        ];
-
-        // El costo de envío por pedido se administra en el plugin DEMV; aquí solo
-        // se valida y registra el egreso de UNA sucursal del mes (un egreso por
-        // sucursal). register_ibex_sucursal recalcula el total vigente.
-        $r = FIN_Orders::register_ibex_sucursal($month, $sucursal);
-        if (is_wp_error($r)) {
-            $extra['fin_err'] = rawurlencode($r->get_error_message());
-        } elseif ((int) $r === 0) {
-            $extra['fin_msg'] = 'ibex_skipped';
-        } else {
-            $extra['fin_msg'] = 'ibex_validated';
+        if (!preg_match('/^\d{4}-\d{2}$/', $month) || $suc === '') {
+            return null;
         }
-        self::redirect_back('envios', $extra);
+
+        $account_id  = FIN_Orders::ibex_account_id();
+        $category_id = FIN_Orders::ibex_category_for($suc);
+        if ($account_id <= 0) {
+            return null;
+        }
+
+        // Las dos mitades de la factura.
+        $ped = FIN_Orders::ibex_sucursal_summary($month, $suc);
+        $tp  = FIN_Traspasos::available()
+            ? FIN_Traspasos::summary($month, $suc)
+            : ['total' => 0.0, 'count' => 0, 'pending' => 0];
+
+        $total = round((float) $ped['total'] + (float) $tp['total'], 2);
+
+        $partes = [];
+        if ((int) $ped['count'] > 0) {
+            $partes[] = sprintf('%d pedido%s', (int) $ped['count'], (int) $ped['count'] === 1 ? '' : 's');
+        }
+        if ((int) $tp['count'] > 0) {
+            $partes[] = sprintf('%d traspaso%s', (int) $tp['count'], (int) $tp['count'] === 1 ? '' : 's');
+        }
+        $description = sprintf('Costo de envío IBEX %s — %s (%s)',
+            $month, $suc, $partes ? implode(' + ', $partes) : 'sin movimientos');
+
+        $ref      = FIN_Orders::ibex_ref($month, $suc);
+        $movement = FIN_Movements::get_by_ref($ref['table'], $ref['id']);
+
+        $block = self::ibex_block([
+            'month'        => $month,
+            'sucursal'     => $suc,
+            'total'        => $total,
+            'tp_pending'   => (int) $tp['pending'],
+            'category_id'  => $category_id,
+            'movement'     => $movement,
+            // Egreso de traspasos suelto de la 2.20: si existiera y lo ignoráramos,
+            // el pago unificado volvería a asentar esos traspasos y quedarían
+            // contados dos veces.
+            'tp_legacy'    => FIN_Traspasos::legacy_movement($month, $suc),
+            'month_legacy' => FIN_Orders::ibex_month_is_legacy($month),
+        ]);
+
+        return [
+            'month'       => $month,
+            'sucursal'    => $suc,
+            'account_id'  => $account_id,
+            'category_id' => $category_id,
+            'amount'      => $total,
+            'ped_total'   => (float) $ped['total'],
+            'ped_count'   => (int) $ped['count'],
+            'tp_total'    => (float) $tp['total'],
+            'tp_count'    => (int) $tp['count'],
+            'tp_pending'  => (int) $tp['pending'],
+            // Fecha de CAJA: hoy (el pago se hace hoy). Editable en el formulario.
+            'date'        => wp_date('Y-m-d'),
+            // Fecha de DEVENGO: fin del mes que se está pagando. NO editable: es la
+            // que manda el Estado de Resultados al mes correcto.
+            'accrual'     => date('Y-m-t', strtotime($month . '-01')) . ' 23:59:59',
+            'description' => $description,
+            'ref'         => $ref,
+            'movement'    => $movement,
+            'block'       => $block,
+        ];
+    }
+
+    /**
+     * Por qué NO se puede asentar el pago de un mes·sucursal, o '' si se puede.
+     *
+     * Es la única definición de "registrable", y la usan los tres lados: el panel
+     * (para no ofrecer el botón), el formulario (para deshabilitarlo) y el guardado
+     * (para rechazar). Un botón deshabilitado no es una validación.
+     *
+     * Recibe los datos ya calculados en vez de recalcularlos: el panel pinta muchas
+     * filas y volver a cargar los pedidos de cada mes agotaría la memoria de PHP.
+     *
+     * @param array $c month, sucursal, total, tp_pending, category_id, movement,
+     *                 tp_legacy, month_legacy
+     */
+    private static function ibex_block(array $c)
+    {
+        $suc   = (string) $c['sucursal'];
+        $month = (string) $c['month'];
+
+        if (!empty($c['movement'])) {
+            return sprintf('El pago de %s de %s ya está registrado (%s). Para corregirlo, anula ese movimiento.',
+                $suc, $month, fin_money((float) $c['movement']['amount']));
+        }
+        if (!empty($c['tp_legacy'])) {
+            return sprintf('Los traspasos de %s — %s ya tienen un egreso aparte (%s, del esquema 2.20). Anúlalo antes de registrar el pago unificado, o los traspasos quedarían contados dos veces.',
+                $suc, $month, fin_money((float) $c['tp_legacy']['amount']));
+        }
+        if (!empty($c['month_legacy'])) {
+            return sprintf('El mes %s ya se pagó con el esquema anterior (un solo egreso del mes). Anula ese movimiento para registrarlo por sucursal.', $month);
+        }
+        if ((int) $c['tp_pending'] > 0) {
+            return sprintf('Hay %d traspaso(s) sin costo de envío cargado en %s — %s. Cárgalos en la caja de Traspasos: si no, el pago sale de menos y no queda rastro de lo que falta.',
+                (int) $c['tp_pending'], $suc, $month);
+        }
+        if ((int) $c['category_id'] <= 0) {
+            return sprintf('No hay categoría de egreso configurada para %s. Sin categoría el Estado de Resultados no puede clasificar el pago.', $suc);
+        }
+        if ((float) $c['total'] <= 0) {
+            return sprintf('No hay monto que registrar para %s en %s.', $suc, $month);
+        }
+        return '';
+    }
+
+    /** URL del formulario de Movimientos prellenado con el pago de IBEX de un mes·sucursal. */
+    public static function ibex_source_url($month, $sucursal)
+    {
+        return add_query_arg([
+            'fin_src'   => self::SRC_IBEX,
+            'fin_month' => $month,
+            'fin_suc'   => $sucursal,
+        ], self::tab_url('movimientos'));
     }
 }

@@ -56,9 +56,13 @@ class FIN_CSV
     {
         $out = self::open($filename);
 
+        // "Saldo cuenta (al asentar)" = `balance_after`: el saldo que tenía la
+        // cuenta cuando se INSERTÓ el asiento. NO es el saldo corrido por fecha
+        // que muestra el listado (el ledger va antedatado, así que los dos órdenes
+        // no coinciden); es el dato de auditoría del asiento. Ver FIN_Movements.
         fputcsv($out, self::safe_row([
             'ID', 'Fecha', 'Cuenta', 'Tipo', 'Categoría', 'Ingreso', 'Egreso',
-            'Saldo cuenta', 'Descripción', 'Referencia', 'Anulado',
+            'Saldo cuenta (al asentar)', 'Descripción', 'Referencia', 'Anulado',
         ]));
 
         foreach ($movements as $m) {

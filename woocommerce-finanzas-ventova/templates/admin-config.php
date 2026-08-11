@@ -313,6 +313,26 @@ $flash_labels = [
                         exactamente con el título del método de envío del pedido.
                     </span>
                 </p>
+                <?php // Arranque del panel: equivalente al corte de meses del panel IBEX.
+                      // Sin esto, los pedidos anteriores a Finanzas quedan como pendientes
+                      // eternos y BLOQUEAN la rendición de la caja chica para siempre. ?>
+                <p>
+                    <label>Mostrar pedidos desde el día
+                        <input type="date" name="ship_hide_before"
+                               value="<?php echo esc_attr($cfg['ship_hide_before']); ?>"
+                               max="<?php echo esc_attr(wp_date('Y-m-d')); ?>" style="width:100%;">
+                    </label>
+                    <span class="fin-help fin-help-block">
+                        <strong>Arranque del sistema.</strong> El panel diario oculta los pedidos
+                        anteriores a esta fecha y dejan de contar como pendientes. Úsalo para los
+                        costos de envío que <strong>ya se pagaron fuera de Finanzas</strong>: no hay
+                        que validarlos (registrarían egresos por gastos ya cubiertos, hundiendo el
+                        saldo de la caja) y, si quedan pendientes,
+                        <strong>bloquean la rendición de la caja chica</strong>.
+                        No crea ni borra ningún egreso: es solo un filtro de visualización.
+                        Vacío = se muestran todos los días.
+                    </span>
+                </p>
                 <p class="fin-card-actions">
                     <button type="submit" class="button button-primary">Guardar configuración</button>
                 </p>
@@ -323,10 +343,11 @@ $flash_labels = [
         <div class="fin-card">
             <h2 style="margin-top:0;">Pago de envío IBEX → Egreso (por mes)</h2>
             <p class="fin-help">
-                Para los pedidos con método de envío <strong>IBEX</strong>. Desde el panel
-                <em>Egresos de envío</em> se valida y registra <strong>un egreso por sucursal</strong>
-                cada mes = total del costo de envío de los pedidos de esa sucursal. Aquí defines
-                la cuenta, una <strong>categoría por sucursal</strong> y el/los método(s) que cuentan como IBEX.
+                IBEX cobra el envío de los <strong>pedidos</strong> y el de los <strong>traspasos</strong>
+                de stock entre sucursales, en una sola factura. Desde el panel <em>Egresos de envío</em> se
+                registra <strong>un egreso por sucursal</strong> cada mes = pedidos + traspasos de esa
+                sucursal. Aquí defines la cuenta, una <strong>categoría por sucursal</strong> y el/los
+                método(s) de pedido que cuentan como IBEX.
             </p>
             <form method="post" action="<?php echo esc_url($ibex_save_url); ?>">
                 <p>
@@ -368,6 +389,8 @@ $flash_labels = [
                     <strong>Método(s) de envío IBEX</strong>
                     <span class="fin-help fin-help-block" style="margin-bottom:6px;">
                         Solo los pedidos con uno de estos métodos entran al panel mensual.
+                        (Los traspasos usan su propio método <code>IBEX</code>, definido en el plugin de Traspasos,
+                        y entran al mismo pago: es la misma factura.)
                     </span>
                     <span class="fin-ship-methods">
                         <?php foreach ($ibex_methods_opts as $m): ?>

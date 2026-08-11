@@ -14,6 +14,15 @@ if (!defined('ABSPATH')) {
  * @var array  $cats_egreso    Categorías activas nature=egreso.
  * @var array  $currencies     Catálogo de monedas [code => ['symbol','name','rate']].
  * @var array  $filter         Filtros actuales.
+ * @var array  $filtered_totals Totales del filtro (by_currency / by_account, neto firmado).
+ * @var array  $running_account [id => saldo CRONOLÓGICO de la cuenta tras el movimiento].
+ * @var array  $running_general [id => saldo CRONOLÓGICO de su moneda tras el movimiento].
+ * @var array  $balances_cutoff [account_id => saldo AL CORTE de 'to'].
+ * @var int[]  $recon_ids       Cuentas que entran en la barra de saldos.
+ * @var array  $accounts_all    [id => fila de cuenta] (activas e inactivas).
+ * @var array  $ledger_mismatch [account_id => diferencia ledger − accounts.balance].
+ * @var array|null $prefill    Pago de IBEX que se está confirmando (FIN_Admin::ibex_source),
+ *                             o null si se entró al formulario normalmente.
  * @var int    $paged          Página actual del listado (1-based).
  * @var int    $per_page       Movimientos por página.
  * @var int    $total_items    Total de movimientos que coinciden con el filtro.
@@ -39,9 +48,17 @@ $today = wp_date('Y-m-d');
 
 $flash_labels = [
     'mov_ok'         => 'Movimiento registrado.',
+    'ibex_ok'        => 'Pago de IBEX registrado. El panel de envíos ya lo marca como registrado.',
     'transfer_ok'    => 'Transferencia registrada.',
     'reversed'       => 'Movimiento anulado.',
 ];
+
+// ── Pago de IBEX en curso ──
+// $prefill llega cuando se entra desde el panel de envíos (ver FIN_Admin::ibex_source).
+// El formulario queda cargado con el pago; el monto se puede ajustar a lo que
+// realmente facturó IBEX, pero la cuenta, la categoría y la referencia las fija el
+// servidor: son las que hacen que el Estado de Resultados clasifique bien el egreso.
+$pf_amount = $prefill ? number_format((float) $prefill['amount'], 2, '.', '') : '';
 ?>
 <div class="wrap">
     <h1 class="wp-heading-inline">Registro de Movimientos</h1>
@@ -83,19 +100,100 @@ $flash_labels = [
                 </div>
             <?php endforeach; ?>
         </div>
+
+        <?php // Descuadre REAL: el saldo denormalizado de la cuenta (el de los badges,
+              // el que valida los egresos) no coincide con la suma del ledger. No es
+              // un problema de filtros: hay que corregirlo con un movimiento de ajuste. ?>
+        <?php if (!empty($ledger_mismatch)): ?>
+            <div class="notice notice-error" style="margin:0 0 14px;">
+                <p><strong>Descuadre entre el saldo de la cuenta y el ledger.</strong>
+                   El saldo guardado en la cuenta no coincide con la suma de sus movimientos:</p>
+                <ul style="margin:0 0 10px 18px;list-style:disc;">
+                    <?php foreach ($ledger_mismatch as $aid => $diff):
+                        $ma   = $accounts_all[(int) $aid] ?? null;
+                        $mcur = $ma ? (string) $ma['currency'] : FIN_Currencies::BASE_CODE;
+                    ?>
+                        <li>
+                            <strong><?php echo esc_html($ma ? $ma['name'] : ('#' . (int) $aid)); ?></strong>:
+                            saldo de la cuenta <?php echo esc_html(fin_money($ma ? $ma['balance'] : 0, $mcur)); ?>,
+                            ledger <?php echo esc_html(fin_money(($ma ? (float) $ma['balance'] : 0) + $diff, $mcur)); ?>
+                            (diferencia <strong><?php echo esc_html(fin_money($diff, $mcur)); ?></strong>).
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+                <p class="fin-help">Regularízalo con un ingreso/egreso de ajuste por la diferencia; los saldos del
+                   cuadre de abajo se calculan desde el ledger.</p>
+            </div>
+        <?php endif; ?>
+    <?php endif; ?>
+
+    <?php // Aviso de la rendición de caja chica: qué fecha es la primera válida. El
+          // candado se aplica en el servidor (FIN_Movements), esto solo lo anticipa. ?>
+    <?php if ($cash_lock_until !== '' && isset($accounts_map[$cash_lock_account])): ?>
+        <div class="notice notice-info" style="margin:0 0 14px;"><p>
+            🔒 <strong><?php echo esc_html($accounts_map[$cash_lock_account]); ?></strong> está
+            <strong>rendida hasta el <?php echo esc_html(mysql2date('d/m/Y', $cash_lock_until . ' 12:00:00')); ?></strong>:
+            no admite movimientos con esa fecha o anterior, ni anulaciones dentro del período.
+            La primera fecha válida es el
+            <strong><?php echo esc_html(mysql2date('d/m/Y', $cash_lock_open . ' 12:00:00')); ?></strong>
+            — usala para registrar la reposición.
+            La rendición se gestiona en
+            <a href="<?php echo esc_url(FIN_Admin::tab_url('envios')); ?>">Egresos de envío (courier)</a>.
+        </p></div>
     <?php endif; ?>
 
     <div class="fin-mov-forms">
 
         <?php // ── Form Ingreso / Egreso ──────────────────────────────── ?>
-        <div class="fin-card fin-mov-form">
-            <h2 style="margin-top:0;">Nuevo ingreso / egreso</h2>
+        <div class="fin-card fin-mov-form<?php echo $prefill ? ' is-prefilled' : ''; ?>">
+            <h2 style="margin-top:0;">
+                <?php echo $prefill ? 'Confirmar pago de IBEX' : 'Nuevo ingreso / egreso'; ?>
+            </h2>
+
+            <?php if ($prefill): ?>
+                <div class="fin-prefill">
+                    <p style="margin:0 0 6px;">
+                        <strong><?php echo esc_html($prefill['sucursal']); ?></strong>
+                        · <?php echo esc_html(ucfirst(wp_date('F Y', strtotime($prefill['month'] . '-01 12:00:00')))); ?>
+                    </p>
+                    <p style="margin:0 0 6px;">
+                        <?php echo (int) $prefill['ped_count']; ?> pedido(s)
+                        <?php echo esc_html(fin_money((float) $prefill['ped_total'])); ?>
+                        + <?php echo (int) $prefill['tp_count']; ?> traspaso(s)
+                        <?php echo esc_html(fin_money((float) $prefill['tp_total'])); ?>
+                        = <strong><?php echo esc_html(fin_money((float) $prefill['amount'])); ?></strong>
+                    </p>
+                    <?php if ($prefill['block'] !== ''): ?>
+                        <p class="fin-status-err" style="margin:0;"><strong>No se puede registrar:</strong>
+                           <?php echo esc_html($prefill['block']); ?></p>
+                    <?php else: ?>
+                        <?php // El devengo no tiene campo en el formulario (lo fija el
+                              // servidor), así que se nombra el mes acá o sería invisible. ?>
+                        <p class="fin-help" style="margin:0;">
+                            Ajustá el monto si la factura difiere. La fecha es la del pago;
+                            el gasto se imputa a <strong><?php echo esc_html(ucfirst(wp_date('F Y', strtotime($prefill['month'] . '-01 12:00:00')))); ?></strong>
+                            en el Estado de Resultados.
+                        </p>
+                    <?php endif; ?>
+                    <p style="margin:8px 0 0;">
+                        <a class="fin-help" href="<?php echo esc_url(FIN_Admin::tab_url('envios')); ?>">← Volver al panel de envíos</a>
+                    </p>
+                </div>
+            <?php endif; ?>
+
             <form method="post" action="<?php echo esc_url($mov_url); ?>">
+                <?php if ($prefill): ?>
+                    <?php // Qué pago es: lo ÚNICO que viaja. El servidor vuelve a resolver
+                          // monto, cuenta, categoría, referencia y fecha de devengo con esto. ?>
+                    <input type="hidden" name="fin_src"   value="<?php echo esc_attr(FIN_Admin::SRC_IBEX); ?>">
+                    <input type="hidden" name="fin_month" value="<?php echo esc_attr($prefill['month']); ?>">
+                    <input type="hidden" name="fin_suc"   value="<?php echo esc_attr($prefill['sucursal']); ?>">
+                <?php endif; ?>
                 <p>
                     <label><strong>Tipo *</strong>
                         <select name="type" id="fin-mov-type" required style="width:100%;">
-                            <option value="ingreso">Ingreso</option>
-                            <option value="egreso">Egreso</option>
+                            <option value="ingreso" <?php selected((bool) $prefill, false); ?>>Ingreso</option>
+                            <option value="egreso"  <?php selected((bool) $prefill, true); ?>>Egreso</option>
                         </select>
                     </label>
                 </p>
@@ -108,6 +206,7 @@ $flash_labels = [
                                 $acur = (string) $a['currency'];
                             ?>
                                 <option value="<?php echo (int) $a['id']; ?>"
+                                        <?php selected($prefill ? (int) $prefill['account_id'] : 0, (int) $a['id']); ?>
                                         data-currency="<?php echo esc_attr($acur); ?>"
                                         data-symbol="<?php echo esc_attr(FIN_Currencies::symbol($acur)); ?>"
                                         data-rate="<?php echo esc_attr(number_format(FIN_Currencies::rate($acur), 6, '.', '')); ?>">
@@ -132,6 +231,7 @@ $flash_labels = [
                             <optgroup label="Egreso" class="fin-cat-egreso">
                                 <?php foreach ($cats_egreso as $c): ?>
                                     <option value="<?php echo (int) $c['id']; ?>" data-nature="egreso"
+                                            <?php selected($prefill ? (int) $prefill['category_id'] : 0, (int) $c['id']); ?>
                                             data-reqdesc="<?php echo !empty($c['requires_description']) ? 1 : 0; ?>">
                                         <?php echo esc_html($c['name'] . ' — ' . FIN_Groups::label($c['group_key'] ?? '')); ?>
                                     </option>
@@ -143,7 +243,8 @@ $flash_labels = [
                 </p>
                 <p>
                     <label><strong>Monto (<span id="fin-mov-amount-cur">Bs</span>) *</strong>
-                        <input type="number" name="amount" min="0.01" step="0.01" required style="width:100%;">
+                        <input type="number" name="amount" min="0.01" step="0.01" required style="width:100%;"
+                               value="<?php echo esc_attr($pf_amount); ?>">
                     </label>
                 </p>
                 <p id="fin-mov-rate-wrap" style="display:none;">
@@ -153,21 +254,28 @@ $flash_labels = [
                     <span class="fin-help fin-help-block">Esta cuenta es en otra moneda: indica el tipo de cambio del movimiento (se guarda como referencia).</span>
                 </p>
                 <p>
-                    <label>Fecha
-                        <input type="date" name="movement_date" value="<?php echo esc_attr($today); ?>" style="width:100%;">
+                    <label><?php echo $prefill ? 'Fecha del pago' : 'Fecha'; ?>
+                        <?php // Fecha de CAJA. El devengo (a qué mes lo imputa el Estado de
+                              // Resultados) NO es este campo: lo fija el servidor con el mes
+                              // que se está pagando. Ver FIN_Admin::ibex_source(). ?>
+                        <input type="date" name="movement_date" style="width:100%;"
+                               value="<?php echo esc_attr($prefill ? $prefill['date'] : $today); ?>">
                     </label>
                 </p>
                 <p>
                     <label><span id="fin-mov-desc-label">Descripción</span>
-                        <textarea name="description" id="fin-mov-desc" rows="2" style="width:100%;"></textarea>
+                        <textarea name="description" id="fin-mov-desc" rows="2" style="width:100%;"><?php
+                            echo esc_textarea($prefill ? $prefill['description'] : '');
+                        ?></textarea>
                     </label>
                     <span class="fin-help fin-help-block" id="fin-mov-desc-hint" style="display:none;">
                         Este motivo ("Otros") requiere una descripción.
                     </span>
                 </p>
                 <p style="margin-top:14px;">
-                    <button type="submit" id="fin-mov-submit" class="button button-primary" <?php disabled(empty($accounts)); ?>>
-                        Registrar movimiento
+                    <button type="submit" id="fin-mov-submit" class="button button-primary"
+                            <?php disabled(empty($accounts) || ($prefill && $prefill['block'] !== '')); ?>>
+                        <?php echo $prefill ? 'Confirmar y registrar el pago' : 'Registrar movimiento'; ?>
                     </button>
                     <span class="fin-help fin-help-block" id="fin-mov-nomot" style="display:none;color:#a00;">
                         Esta cuenta no tiene motivos permitidos. Asígnalos en
@@ -317,33 +425,37 @@ $flash_labels = [
             <?php endif; ?>
 
             <?php
-            // Control de saldos del historial: resumen del filtro + saldos al corte.
+            // Resumen del filtro, por moneda. El `neto` es la Σ FIRMADA de TODOS los
+            // tipos (incluye transferencias y apertura), no solo ingreso/egreso: por
+            // eso equivale a la variación real del saldo en el período — siempre que
+            // el filtro no excluya movimientos (tipo / categoría / búsqueda sí lo
+            // hacen). Ver FIN_Movements::filtered_totals().
             $cutoff_label = $filter['to'] !== ''
                 ? ('al ' . mysql2date('d/m/Y', $filter['to'] . ' 12:00:00'))
-                : '(actual)';
-            // SALDO GENERAL por moneda al corte (no se consolida entre monedas).
-            $cutoff_by_cur = [];
+                : 'actual';
             ?>
             <div class="fin-mov-control">
                 <div class="fin-mov-summary">
                     <span><strong><?php echo (int) $filtered_totals['count']; ?></strong> movimiento(s) en el filtro</span>
                     <?php if (empty($filtered_totals['by_currency'])): ?>
                         <span class="fin-status-muted">Sin movimientos.</span>
-                    <?php else: foreach ($filtered_totals['by_currency'] as $code => $tc): $neto_neg = $tc['neto'] < 0; ?>
+                    <?php else: foreach ($filtered_totals['by_currency'] as $code => $tc): ?>
                         <span class="fin-mov-summary__cur">
                             <strong><?php echo esc_html($code); ?></strong> ·
                             Ingresos: <strong class="fin-status-ok"><?php echo esc_html(fin_money($tc['ingresos'], $code)); ?></strong> ·
                             Egresos: <strong class="fin-status-err"><?php echo esc_html(fin_money($tc['egresos'], $code)); ?></strong> ·
-                            Neto: <strong class="<?php echo $neto_neg ? 'fin-status-err' : 'fin-status-ok'; ?>"><?php echo esc_html(fin_money($tc['neto'], $code)); ?></strong>
+                            Neto: <strong class="<?php echo $tc['neto'] < 0 ? 'fin-status-err' : 'fin-status-ok'; ?>"><?php echo esc_html(fin_money($tc['neto'], $code)); ?></strong>
                         </span>
                     <?php endforeach; endif; ?>
                 </div>
                 <div class="fin-cutoff">
                     <span class="fin-cutoff__label">Saldo por cuenta <?php echo esc_html($cutoff_label); ?>:</span>
-                    <?php foreach ($accounts as $a):
-                        $aid  = (int) $a['id'];
+                    <?php $cutoff_by_cur = []; ?>
+                    <?php foreach ($recon_ids as $aid):
+                        $a = $accounts_all[(int) $aid] ?? null;
+                        if (!$a) continue;
                         $acur = (string) $a['currency'];
-                        $bal  = $balances_cutoff[$aid] ?? 0.0;
+                        $bal  = (float) ($balances_cutoff[(int) $aid] ?? 0.0);
                         $cutoff_by_cur[$acur] = ($cutoff_by_cur[$acur] ?? 0.0) + $bal;
                     ?>
                         <span class="fin-cutoff__item">
@@ -403,8 +515,8 @@ $flash_labels = [
                         <th>Tipo</th>
                         <th>Categoría / Descripción</th>
                         <th style="width:120px;" class="fin-num"><a class="fin-sort" href="<?php echo $sort_link('amount'); ?>">Monto<?php echo $sort_arrow('amount'); ?></a></th>
-                        <th style="width:120px;" class="fin-num" title="Saldo de la cuenta tras este movimiento">Saldo cuenta</th>
-                        <th style="width:120px;" class="fin-num" title="Saldo general (suma de todas las cuentas) tras este movimiento">Saldo general</th>
+                        <th style="width:120px;" class="fin-num" title="Saldo de la cuenta tras este movimiento, en orden cronológico (por fecha del movimiento)">Saldo cuenta</th>
+                        <th style="width:120px;" class="fin-num" title="Saldo de todas las cuentas de esta moneda tras este movimiento, en orden cronológico">Saldo general</th>
                         <th style="width:80px;">Acción</th>
                     </tr>
                 </thead>
@@ -417,7 +529,12 @@ $flash_labels = [
                     $is_rev    = !empty($m['reverses_id']);
                     $cat_name  = (!empty($m['category_id']) && isset($categories_map[(int) $m['category_id']]))
                         ? $categories_map[(int) $m['category_id']] : '';
-                    $can_reverse = in_array($m['type'], ['ingreso', 'egreso'], true) && !$reversed && !$is_rev;
+                    // Un movimiento del período cerrado no se puede anular: el
+                    // contrasiento se fecha hoy, pero el que sale del saldo es el
+                    // ORIGINAL, que está dentro del cierre — el saldo al corte
+                    // cambiaría de forma retroactiva. Ver FIN_Rendicion.
+                    $locked      = FIN_Rendicion::is_locked((int) $m['account_id'], (string) $m['movement_date']);
+                    $can_reverse = in_array($m['type'], ['ingreso', 'egreso'], true) && !$reversed && !$is_rev && !$locked;
                     $reverse_url = add_query_arg([
                         'action'               => 'fin_reverse_movement',
                         'movement_id'          => (int) $m['id'],
@@ -438,8 +555,17 @@ $flash_labels = [
                         <td>
                             <?php if ($cat_name !== ''): ?><strong><?php echo esc_html($cat_name); ?></strong><br><?php endif; ?>
                             <?php echo esc_html((string) $m['description']); ?>
-                            <?php if (!empty($m['ref_code'])): ?>
-                                <span class="fin-mono fin-status-muted">[<?php echo esc_html($m['ref_code']); ?>]</span>
+                            <?php
+                            // El ref_code solo se muestra si APORTA algo: si ya está
+                            // contenido en la descripción es ruido. Los movimientos
+                            // viejos guardan el número de pedido en ref_code, que la
+                            // descripción ya trae ("Depósito pedido #40476 [40476]");
+                            // los nuevos guardan la GUÍA, que sí es un dato distinto.
+                            $ref = trim((string) ($m['ref_code'] ?? ''));
+                            $show_ref = $ref !== '' && strpos((string) $m['description'], $ref) === false;
+                            ?>
+                            <?php if ($show_ref): ?>
+                                <span class="fin-mono fin-status-muted" title="Guía / referencia">[<?php echo esc_html($ref); ?>]</span>
                             <?php endif; ?>
                         </td>
                         <?php
@@ -455,7 +581,13 @@ $flash_labels = [
                                 </span>
                             <?php endif; ?>
                         </td>
-                        <td class="fin-num"><?php echo esc_html(fin_money($m['balance_after'], $mcur)); ?></td>
+                        <?php // Saldos CRONOLÓGICOS (recalculados por fecha), no `balance_after`
+                              // (que es el saldo al asentar, en orden de inserción, y con el
+                              // ledger antedatado no coincide con el orden del listado). ?>
+                        <td class="fin-num"><?php
+                            $acc_run = $running_account[(int) $m['id']] ?? null;
+                            echo $acc_run === null ? '—' : esc_html(fin_money($acc_run, $mcur));
+                        ?></td>
                         <td class="fin-num-b"><?php
                             $gen = $running_general[(int) $m['id']] ?? null;
                             echo $gen === null ? '—' : esc_html(fin_money($gen, $mcur));
@@ -464,6 +596,8 @@ $flash_labels = [
                             <?php if ($can_reverse): ?>
                                 <a href="<?php echo esc_url($reverse_url); ?>" class="button button-small"
                                    onclick="return confirm('¿Anular este movimiento con un contrasiento?');">Anular</a>
+                            <?php elseif ($locked): ?>
+                                <span class="fin-status-muted" title="Caja rendida al <?php echo esc_attr(mysql2date('d/m/Y', $cash_lock_until . ' 12:00:00')); ?>: este movimiento no se puede anular">🔒</span>
                             <?php else: ?>
                                 <span class="fin-status-muted">—</span>
                             <?php endif; ?>

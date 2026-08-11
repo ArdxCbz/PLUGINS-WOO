@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
  */
 class FIN_Schema
 {
-    const DB_VERSION = '1.2';
+    const DB_VERSION = '1.4';
     const OPTION_KEY = 'fin_db_version';
 
     public static function table($name)
@@ -48,7 +48,48 @@ class FIN_Schema
         // DEFAULT 'BOB' / 1 deja las filas viejas en la moneda base (Bs), que es
         // el comportamiento mono-moneda previo. Sin acción adicional aquí.
 
+        // Migración 1.2 → 1.3: índices CRONOLÓGICOS CUBRIENTES
+        // (account_id|currency, movement_date, id, direction, amount). El ledger va
+        // antedatado (el depósito lleva la fecha real del depósito, el envío la de
+        // creación del pedido, el IBEX el fin de mes), así que el orden por `id` NO
+        // es el orden por fecha y el saldo corrido debe recalcularse por
+        // `movement_date` (FIN_Movements::running_maps). Al llevar `direction` y
+        // `amount`, la suma acumulada se resuelve dentro del índice. Solo son
+        // índices: dbDelta los agrega, no hay backfill de datos.
+
+        // Migración 1.3 → 1.4: `accrual_date` (fecha de DEVENGO) en movimientos.
+        // Un pago puede hacerse en un mes y corresponder a otro: el pago mensual de
+        // IBEX se hace hoy, pero el costo es de las ventas y traspasos del mes que
+        // se está pagando. La CAJA tiene que verlo en la fecha real del pago
+        // (`movement_date`, si no el saldo de la cuenta miente) y el ESTADO DE
+        // RESULTADOS en el mes que lo devengó (`accrual_date`, si no el gasto cae en
+        // el mes equivocado y ese mes se ve más rentable de lo que fue).
+        // Para el 99% de los movimientos ambas fechas coinciden; por eso el backfill
+        // copia `movement_date` y `insert()` la rellena siempre. La columna NO es
+        // NULL en la práctica: se consulta directo (indexable), sin COALESCE.
+        if ($current !== '' && version_compare($current, '1.4', '<')) {
+            self::backfill_accrual_date_1_4();
+        }
+
         update_option(self::OPTION_KEY, self::DB_VERSION, false);
+    }
+
+    /**
+     * Rellena `accrual_date` con `movement_date` en las filas anteriores a 1.4.
+     * Idempotente: solo toca las que quedaron en NULL tras el ALTER.
+     */
+    public static function backfill_accrual_date_1_4()
+    {
+        global $wpdb;
+        $t = self::table('movements');
+        if ($wpdb->get_var("SHOW TABLES LIKE '$t'") !== $t) {
+            return;
+        }
+        $cols = $wpdb->get_col("SHOW COLUMNS FROM $t", 0);
+        if (!in_array('accrual_date', $cols, true)) {
+            return;
+        }
+        $wpdb->query("UPDATE $t SET accrual_date = movement_date WHERE accrual_date IS NULL");
     }
 
     /**
@@ -163,6 +204,18 @@ class FIN_Schema
         //  - `transfer_id` une las dos patas (out/in) de una transferencia.
         //  - `ref_table`/`ref_id`/`ref_code` trazan al documento origen
         //    (p.ej. 'purchases' / id / 'COMP-2026-0001') para idempotencia.
+        //  - `accrual_date` (1.4+) es la fecha de DEVENGO: a qué período pertenece
+        //    el hecho económico, que no siempre es cuando se paga (el pago mensual
+        //    de IBEX se hace hoy y devenga en el mes que paga). La CAJA usa
+        //    `movement_date`; el ESTADO DE RESULTADOS usa `accrual_date`. Iguales
+        //    salvo que se indique lo contrario.
+        //  - ORDEN CRONOLÓGICO ≠ ORDEN DE `id`: los movimientos se antedatan
+        //    (fecha real del depósito, fecha de creación del pedido, fecha elegida
+        //    a mano), así que un movimiento insertado hoy
+        //    puede quedar fechado antes de otro más viejo. De ahí `balance_after`
+        //    (saldo al ASENTAR, dato de auditoría del asiento) vs. el saldo
+        //    corrido por fecha, que se recalcula al vuelo sobre los índices
+        //    `account_chrono_date` / `currency_chrono_date`.
         $sql_movements = "CREATE TABLE $movements (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             account_id BIGINT UNSIGNED NOT NULL,
@@ -175,6 +228,7 @@ class FIN_Schema
             balance_after DECIMAL(14,2) NOT NULL DEFAULT 0.00,
             description TEXT,
             movement_date DATETIME NOT NULL,
+            accrual_date DATETIME DEFAULT NULL,
             transfer_id BIGINT UNSIGNED DEFAULT NULL,
             reverses_id BIGINT UNSIGNED DEFAULT NULL,
             reversed_at DATETIME DEFAULT NULL,
@@ -186,7 +240,10 @@ class FIN_Schema
             created_at DATETIME NOT NULL,
             PRIMARY KEY  (id),
             KEY account_chrono (account_id, id),
+            KEY account_chrono_date (account_id, movement_date, id, direction, amount),
+            KEY currency_chrono_date (currency, movement_date, id, direction, amount),
             KEY movement_date_key (movement_date),
+            KEY accrual_date_key (accrual_date),
             KEY category_date (category_id, movement_date),
             KEY type_date (type, movement_date),
             KEY transfer_key (transfer_id),

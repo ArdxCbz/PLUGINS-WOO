@@ -5,8 +5,14 @@ if (!defined('ABSPATH')) {
 /**
  * Pestaña "Egresos de envío": dos paneles —
  *  1) Courier por día (un egreso por pedido, fecha = creación del pedido).
- *  2) IBEX por mes (un egreso mensual = total del costo de envío de los pedidos
- *     IBEX del mes).
+ *  2) IBEX por mes. IBEX cobra el envío de los PEDIDOS y el de los TRASPASOS de
+ *     stock entre sucursales, en una sola factura: se paga con UN egreso por
+ *     mes·sucursal (pedidos + traspasos).
+ *
+ * El panel NO asienta: enlaza al formulario de Movimientos con el pago cargado,
+ * para revisarlo (y ajustar el monto a la factura real) antes de tocar el ledger.
+ * El egreso se fecha el día del PAGO, pero devenga en el MES QUE SE PAGA (es el
+ * que generó el costo): esa es la fecha que usa el Estado de Resultados.
  *
  * @var bool   $ship_configured ¿Courier configurado (cuenta + categoría + métodos)?
  * @var array  $ship_methods    Métodos de envío courier permitidos (títulos).
@@ -15,9 +21,17 @@ if (!defined('ABSPATH')) {
  * @var string $ship_to         'Y-m-d'
  * @var bool   $ibex_configured ¿IBEX configurado (cuenta + categoría + métodos)?
  * @var array  $ibex_methods    Métodos IBEX permitidos (títulos).
- * @var array  $ibex_months     Pedidos IBEX agrupados por mes (ver FIN_Orders).
+ * @var array  $ibex_view       Mes => [legacy…, ped_*, tp_*, sucursales[SUC => fila del pago]].
+ * @var bool   $ibex_tp_available  ¿Está activo el plugin de Traspasos?
  * @var string $ibex_from       'Y-m-d'
  * @var string $ibex_to         'Y-m-d'
+ * @var array|null $lock_account  Cuenta de caja chica (null si no está configurada).
+ * @var array  $lock_state      Estado del cierre (date/by/at/balance/history).
+ * @var string $lock_until      Fecha hasta la que la caja está cerrada ('' = abierta).
+ * @var string $lock_cutoff     Corte propuesto para el próximo cierre.
+ * @var array  $lock_blockers   Egresos pendientes que impiden cerrar a ese corte.
+ * @var float  $lock_balance    Saldo de la caja al corte (= la deuda a recargar).
+ * @var bool   $lock_can        ¿Se puede cerrar a ese corte?
  * @var string $nonce
  * @var string $base_url        admin-post.php
  * @var string $flash_msg
@@ -28,16 +42,15 @@ $ship_validate_url = add_query_arg([
     FIN_Admin::NONCE_FIELD => $nonce,
 ], $base_url);
 
-$ibex_validate_url = add_query_arg([
-    'action'              => 'fin_validate_ibex_month',
+$close_cash_url = add_query_arg([
+    'action'              => 'fin_close_cash',
     FIN_Admin::NONCE_FIELD => $nonce,
 ], $base_url);
 
 $flash_labels = [
     'ship_saved'     => 'Montos de envío guardados.',
     'ship_validated' => 'Egresos de envío registrados.',
-    'ibex_validated' => 'Egreso mensual de IBEX registrado.',
-    'ibex_skipped'   => 'No había monto para registrar (o el mes ya estaba validado).',
+    'cash_closed'    => 'Caja chica rendida. Ya puedes registrar la reposición con fecha posterior a la rendición.',
 ];
 // Detalle de la validación de envíos (conteos) para el aviso.
 $ship_n = isset($_GET['ship_n']) ? (int) $_GET['ship_n'] : null;
@@ -60,6 +73,151 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
     <?php endif; ?>
     <?php if ($flash_err !== ''): ?>
         <div class="notice notice-error is-dismissible"><p><?php echo esc_html($flash_err); ?></p></div>
+    <?php endif; ?>
+
+    <?php // ── Rendición de caja chica ──────────────────────────────────────────
+          // Vive aquí, y no en una pestaña aparte, porque lo que impide rendir son
+          // los egresos de envío sin validar que se listan más abajo: el bloqueo y
+          // su solución quedan a la vista, sin navegar.
+    ?>
+    <?php if ($lock_account): ?>
+        <?php
+        $lc_cur     = (string) $lock_account['currency'];
+        $lc_pending = (int) $lock_blockers['count'];
+        $lc_debt    = $lock_balance < 0 ? -$lock_balance : 0.0;
+        ?>
+        <div class="fin-card fin-cashlock">
+            <h2 class="fin-cashlock__title">
+                Rendición de caja chica — <?php echo esc_html($lock_account['name']); ?>
+            </h2>
+
+            <div class="fin-cashlock__state">
+                <?php if ($lock_until !== ''): ?>
+                    <span class="fin-cashlock__badge is-closed">
+                        🔒 Rendida hasta el <strong><?php echo esc_html(mysql2date('d/m/Y', $lock_until . ' 12:00:00')); ?></strong>
+                    </span>
+                    <span class="fin-help">
+                        No se admiten movimientos con esa fecha o anterior.
+                        Primera fecha válida: <strong><?php echo esc_html(mysql2date('d/m/Y', FIN_Rendicion::first_open_date() . ' 12:00:00')); ?></strong>.
+                        <?php if (!empty($lock_state['at'])): ?>
+                            Rendida el <?php echo esc_html(mysql2date('d/m/Y H:i', $lock_state['at'])); ?>
+                            <?php $lc_user = get_userdata((int) $lock_state['by']); ?>
+                            <?php if ($lc_user): ?>por <?php echo esc_html($lc_user->display_name); ?><?php endif; ?>,
+                            con saldo <?php echo esc_html(fin_money((float) $lock_state['balance'], $lc_cur)); ?>.
+                        <?php endif; ?>
+                    </span>
+                <?php else: ?>
+                    <span class="fin-cashlock__badge is-open">Sin rendir</span>
+                    <span class="fin-help">Todo el histórico admite movimientos.</span>
+                <?php endif; ?>
+            </div>
+
+            <?php
+            // La fecha de corte se elige por GET, no como un simple campo del POST:
+            // los pendientes, el saldo y el "a reponer" DEPENDEN de esa fecha, así
+            // que hay que recalcularlos en el servidor cuando cambia. Con la fecha
+            // como campo suelto del POST, el panel seguía mostrando el cálculo de HOY
+            // aunque eligieras ayer —y bloqueaba la rendición por los pendientes de
+            // hoy, que quedaban fuera del corte—. Al recargar por GET, todo lo que se
+            // ve corresponde a la fecha elegida.
+            //
+            // Los dos formularios son HERMANOS, no anidados (anidar <form> es HTML
+            // inválido y el navegador descarta el interno).
+            $lock_min = $lock_until !== '' ? FIN_Rendicion::first_open_date() : '';
+            ?>
+            <div class="fin-cashlock__grid">
+                <form method="get" class="fin-cashlock__field">
+                    <input type="hidden" name="page" value="<?php echo esc_attr(FIN_Admin::PAGE_SLUG); ?>">
+                    <input type="hidden" name="tab"  value="envios">
+                    <input type="hidden" name="ship_from" value="<?php echo esc_attr($ship_from); ?>">
+                    <input type="hidden" name="ship_to"   value="<?php echo esc_attr($ship_to); ?>">
+                    <span>Rendir hasta</span>
+                    <span class="fin-cashlock__pick">
+                        <input type="date" name="lock_cutoff" value="<?php echo esc_attr($lock_cutoff); ?>"
+                               max="<?php echo esc_attr(wp_date('Y-m-d')); ?>"
+                               <?php if ($lock_min !== ''): ?>min="<?php echo esc_attr($lock_min); ?>"<?php endif; ?>
+                               onchange="this.form.submit();" required>
+                        <button type="submit" class="button button-small">Calcular</button>
+                    </span>
+                    <span class="fin-help">Al cambiar la fecha se recalcula el saldo y los pendientes.</span>
+                </form>
+                <div class="fin-cashlock__field">
+                    <span>Saldo de la caja a esa fecha</span>
+                    <strong class="fin-cashlock__balance <?php echo $lock_balance < 0 ? 'fin-status-err' : 'fin-status-ok'; ?>">
+                        <?php echo esc_html(fin_money($lock_balance, $lc_cur)); ?>
+                    </strong>
+                </div>
+                <div class="fin-cashlock__field">
+                    <span>A reponer</span>
+                    <?php if ($lc_debt > 0): ?>
+                        <strong class="fin-cashlock__balance"><?php echo esc_html(fin_money($lc_debt, $lc_cur)); ?></strong>
+                    <?php else: ?>
+                        <strong class="fin-cashlock__balance fin-status-ok">—</strong>
+                        <span class="fin-help">la caja no está en rojo a esa fecha</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <?php // Doble validación: la rendición es IRREVERSIBLE (no hay reabrir).
+                  // 1) checkbox de reconocimiento, exigido también en el servidor;
+                  // 2) confirmación con la fecha concreta que se va a rendir. ?>
+            <form method="post" action="<?php echo esc_url($close_cash_url); ?>" class="fin-cashlock__form"
+                  onsubmit="return confirm('Vas a RENDIR la caja chica hasta el <?php echo esc_js(mysql2date('d/m/Y', $lock_cutoff . ' 12:00:00')); ?>.\n\nEsto es IRREVERSIBLE: a partir de ahora no se podrán registrar ni anular movimientos con esa fecha o anterior.\n\n¿Confirmás?');">
+                <input type="hidden" name="lock_cutoff" value="<?php echo esc_attr($lock_cutoff); ?>">
+
+                <?php if ($lc_pending > 0): ?>
+                    <p class="fin-cashlock__warn">
+                        <strong>No se puede rendir hasta el <?php echo esc_html(mysql2date('d/m/Y', $lock_cutoff . ' 12:00:00')); ?>:
+                        <?php echo (int) $lc_pending; ?> egreso(s) de envío sin validar</strong>
+                        con esa fecha o anterior
+                        <?php if ((float) $lock_blockers['total'] > 0): ?>
+                            (<?php echo esc_html(fin_money((float) $lock_blockers['total'], $lc_cur)); ?> ya cargados)
+                        <?php endif; ?>.
+                        <?php // Los pendientes POSTERIORES al corte no bloquean: por eso rendir
+                              // hasta ayer es válido aunque hoy haya pedidos sin validar. ?>
+                        <span class="fin-help">
+                            (Los pendientes con fecha posterior al corte no cuentan: podés rendir hasta una fecha
+                            anterior y dejar los de después para más adelante.)
+                        </span>
+                        Esa plata ya salió de la caja pero todavía no está en el ledger: si rendís así, el saldo queda
+                        inflado y <strong>repondrías un monto equivocado</strong>. Valídalos en los días de abajo.
+                        <br>
+                        <span class="fin-help">
+                            Un pedido sin costo cargado también cuenta como pendiente: es la señal de que falta ponerle el
+                            monto. Si de verdad no lleva costo de envío, cambiale el método de envío en el pedido y sale del panel.
+                            <?php if (FIN_Orders::ship_hide_before() === ''): ?>
+                                <br><strong>¿Son pedidos viejos, saldados fuera de Finanzas?</strong> No los valides:
+                                fija el <em>arranque del panel</em> en
+                                <a href="<?php echo esc_url(FIN_Admin::tab_url('config')); ?>">Configuración → Egreso de envío (courier)</a>
+                                y dejarán de contar como pendientes (no se les registra ningún egreso).
+                            <?php endif; ?>
+                        </span>
+                    </p>
+                <?php endif; ?>
+
+                <?php if ($lock_can): ?>
+                    <p class="fin-cashlock__ack">
+                        <label>
+                            <input type="checkbox" name="confirm_rendir" value="1" required>
+                            Entiendo que la rendición es <strong>irreversible</strong>: no se podrá deshacer
+                            ni registrar o anular movimientos en la caja con esa fecha o anterior.
+                        </label>
+                    </p>
+                <?php endif; ?>
+
+                <p style="margin:12px 0 0;">
+                    <button type="submit" class="button button-primary" <?php disabled(!$lock_can); ?>>
+                        Rendir caja hasta esta fecha
+                    </button>
+                    <span class="fin-help fin-help-block">
+                        Rendir solo fija la línea de partida: <strong>no registra la reposición</strong>.
+                        Una vez rendida, registrá la reposición en
+                        <a href="<?php echo esc_url(FIN_Admin::tab_url('movimientos')); ?>">Movimientos</a>
+                        con fecha posterior a la rendición.
+                    </span>
+                </p>
+            </form>
+        </div>
     <?php endif; ?>
 
     <div class="fin-card fin-ship-panel">
@@ -170,12 +328,23 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
             </p></div>
         <?php else: ?>
             <p class="fin-help">
-                Método(s): <strong><?php echo esc_html(implode(', ', $ibex_methods)); ?></strong>.
-                Resumen por mes y <strong>por sucursal</strong> (cantidad de pedidos y total).
-                <strong>Valida cada sucursal</strong> para registrar <strong>un egreso por sucursal</strong>
-                (fecha = fin de mes), cada uno con su categoría. Una vez validada, la sucursal queda
-                bloqueada. El costo de envío de cada pedido se administra en el plugin <strong>DEMV</strong>.
+                Método(s) de pedidos: <strong><?php echo esc_html(implode(', ', $ibex_methods)); ?></strong>.
+                IBEX cobra el envío de los <strong>pedidos</strong> y el de los <strong>traspasos</strong> de stock
+                entre sucursales. Es una sola factura, así que se paga con <strong>un solo egreso</strong> por
+                mes y sucursal: pedidos + traspasos.
+                El botón <em>Registrar</em> no asienta nada: lleva al formulario de Movimientos con el pago cargado,
+                para revisarlo y <strong>ajustar el monto a la factura real</strong> antes de confirmarlo.
+                El egreso se fecha el <strong>día del pago</strong>, pero el Estado de Resultados lo carga al
+                <strong>mes que se está pagando</strong> (es el mes que generó el costo).
+                El costo de envío de cada pedido se administra en <strong>DEMV</strong>; el de cada traspaso, en la
+                <strong>caja de Traspasos</strong>.
             </p>
+
+            <?php if (!$ibex_tp_available): ?>
+                <p class="fin-help">
+                    <em>El plugin de Traspasos no está activo: el pago sale solo con el envío de los pedidos.</em>
+                </p>
+            <?php endif; ?>
 
             <form method="get" class="fin-filter-bar" style="margin:6px 0 14px;">
                 <input type="hidden" name="page" value="<?php echo esc_attr(FIN_Admin::PAGE_SLUG); ?>">
@@ -185,71 +354,93 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
                 <button type="submit" class="button">Filtrar</button>
             </form>
 
-            <?php if (empty($ibex_months)): ?>
-                <p><em>No hay pedidos con método IBEX en el rango elegido.</em></p>
-            <?php else: foreach ($ibex_months as $month => $info):
-                $month_lbl = wp_date('F Y', strtotime($month . '-01 12:00:00'));
-                $is_legacy = !empty($info['legacy']);
+            <?php if (empty($ibex_view)): ?>
+                <p><em>No hay pedidos ni traspasos con envío IBEX en el rango elegido.</em></p>
+            <?php else: foreach ($ibex_view as $month => $info):
+                $month_lbl  = wp_date('F Y', strtotime($month . '-01 12:00:00'));
+                $is_legacy  = !empty($info['legacy']);
+                $mes_total  = (float) $info['ped_total'] + (float) $info['tp_total'];
             ?>
                 <div class="fin-ship-day">
                     <div class="fin-ship-day__head">
                         <strong style="text-transform:capitalize;"><?php echo esc_html($month_lbl); ?></strong>
                         <span class="fin-help">
-                            <strong><?php echo (int) $info['count']; ?></strong> pedido(s) ·
-                            total <strong><?php echo esc_html(fin_money($info['total'])); ?></strong>
+                            <strong><?php echo (int) $info['ped_count']; ?></strong> pedido(s)
+                            <?php echo esc_html(fin_money((float) $info['ped_total'])); ?>
+                            <?php if ($ibex_tp_available): ?>
+                                · <strong><?php echo (int) $info['tp_count']; ?></strong> traspaso(s)
+                                <?php echo esc_html(fin_money((float) $info['tp_total'])); ?>
+                            <?php endif; ?>
+                            · factura del mes <strong><?php echo esc_html(fin_money($mes_total)); ?></strong>
                         </span>
                     </div>
 
                     <?php if ($is_legacy): ?>
                         <p class="fin-help" style="margin:8px 0 0;">
-                            Mes registrado con el esquema anterior (un solo egreso de
-                            <strong><?php echo esc_html(fin_money($info['legacy_amount'])); ?></strong>
-                            el <?php echo esc_html(mysql2date('d/m/Y', $info['legacy_date'])); ?>).
-                            Para corregir o re-dividir por sucursal, anula ese egreso en Registro de Movimientos.
+                            Este mes se pagó con el esquema anterior
+                            (un solo egreso del mes<?php if ($info['legacy_amount'] !== null): ?>,
+                            de <strong><?php echo esc_html(fin_money((float) $info['legacy_amount'])); ?></strong>
+                            el <?php echo esc_html(mysql2date('d/m/Y', (string) $info['legacy_date'])); ?><?php endif; ?>).
+                            Para re-dividirlo por sucursal, anula ese egreso en Registro de Movimientos.
                         </p>
-                    <?php else: ?>
-                        <table class="widefat striped" style="margin-top:8px;">
-                            <thead><tr>
-                                <th>Sucursal</th>
-                                <th style="width:90px;">Pedidos</th>
-                                <th style="width:150px;">Total</th>
-                                <th style="width:240px;">Estado</th>
-                            </tr></thead>
-                            <tbody>
-                            <?php foreach ($info['sucursales'] as $suc => $s):
-                                $s_validated = !empty($s['validated']);
-                                $has_cat     = (int) $s['category_id'] > 0;
-                            ?>
-                                <tr>
-                                    <td><strong><?php echo esc_html($suc); ?></strong></td>
-                                    <td><?php echo (int) $s['count']; ?></td>
-                                    <td><strong><?php echo esc_html(fin_money($s['total'])); ?></strong></td>
-                                    <td>
-                                        <?php if ($s_validated): ?>
-                                            <span class="fin-status-ok">✓ validado</span>
-                                            (<?php echo esc_html(fin_money($s['movement_amount'])); ?>
-                                            el <?php echo esc_html(mysql2date('d/m/Y', $s['movement_date'])); ?>)
-                                        <?php elseif (!$has_cat): ?>
-                                            <span class="fin-status-err">Sin categoría</span>
-                                            <a href="<?php echo esc_url(FIN_Admin::tab_url('config')); ?>">configurar</a>
-                                        <?php else: ?>
-                                            <form method="post" action="<?php echo esc_url($ibex_validate_url); ?>" style="margin:0;">
-                                                <input type="hidden" name="month"     value="<?php echo esc_attr($month); ?>">
-                                                <input type="hidden" name="sucursal"  value="<?php echo esc_attr($suc); ?>">
-                                                <input type="hidden" name="ibex_from" value="<?php echo esc_attr($ibex_from); ?>">
-                                                <input type="hidden" name="ibex_to"   value="<?php echo esc_attr($ibex_to); ?>">
-                                                <button type="submit" class="button button-primary button-small"
-                                                    onclick="return confirm('¿Registrar el egreso de envío IBEX de <?php echo esc_js($suc); ?> — <?php echo esc_js($month_lbl); ?> (<?php echo esc_js(fin_money($s['total'])); ?>)? Quedará bloqueado (para corregir habría que anular el movimiento).');">
-                                                    Validar y registrar
-                                                </button>
-                                            </form>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                            </tbody>
-                        </table>
                     <?php endif; ?>
+
+                    <table class="widefat striped" style="margin-top:8px;">
+                        <thead><tr>
+                            <th>Sucursal</th>
+                            <th style="width:150px;">Pedidos</th>
+                            <th style="width:150px;">Traspasos</th>
+                            <th style="width:150px;">A pagar</th>
+                            <th style="width:320px;">Estado</th>
+                        </tr></thead>
+                        <tbody>
+                        <?php foreach ($info['sucursales'] as $suc => $s):
+                            // UNA fila por sucursal: pedidos + traspasos = un solo egreso
+                            // (una sola factura de IBEX, una sola salida de plata).
+                            $mv      = $s['movement'];
+                            $block   = (string) $s['block'];
+                            $src_url = FIN_Admin::ibex_source_url($month, $suc);
+                        ?>
+                            <tr>
+                                <td><strong><?php echo esc_html($suc); ?></strong></td>
+                                <td>
+                                    <?php echo (int) $s['ped_count']; ?> ·
+                                    <?php echo esc_html(fin_money((float) $s['ped_total'])); ?>
+                                </td>
+                                <td>
+                                    <?php if (!$ibex_tp_available): ?>
+                                        <span class="fin-help">—</span>
+                                    <?php else: ?>
+                                        <?php echo (int) $s['tp_count']; ?> ·
+                                        <?php echo esc_html(fin_money((float) $s['tp_total'])); ?>
+                                        <?php if ((int) $s['tp_pending'] > 0): ?>
+                                            <span class="fin-status-err">
+                                                (<?php echo (int) $s['tp_pending']; ?> sin costo)
+                                            </span>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </td>
+                                <td><strong><?php echo esc_html(fin_money((float) $s['total'])); ?></strong></td>
+                                <td>
+                                    <?php if ($mv): ?>
+                                        <span class="fin-status-ok">✓ pagado</span>
+                                        (<?php echo esc_html(fin_money((float) $mv['amount'])); ?>
+                                        el <?php echo esc_html(mysql2date('d/m/Y', (string) $mv['movement_date'])); ?>)
+                                    <?php elseif ($block !== ''): ?>
+                                        <span class="fin-status-err"><?php echo esc_html($block); ?></span>
+                                    <?php else: ?>
+                                        <a class="button button-primary button-small" href="<?php echo esc_url($src_url); ?>">
+                                            Registrar en Movimientos
+                                        </a>
+                                        <span class="fin-help fin-help-block">
+                                            Se abre el formulario con el pago cargado; ahí lo confirmás.
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
             <?php endforeach; endif; ?>
         <?php endif; ?>

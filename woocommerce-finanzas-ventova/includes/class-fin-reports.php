@@ -445,7 +445,8 @@ class FIN_Reports
         global $wpdb;
         $m = FIN_Schema::table('movements');
 
-        list($where, $params) = self::date_where($from, $to, 'm');
+        // Por DEVENGO: este bloque es parte del Estado de Resultados.
+        list($where, $params) = self::date_where($from, $to, 'm', 'accrual_date');
         $where[]  = "m.type IN ('ingreso','egreso')";
         $where[]  = "m.currency <> %s";
         $params[] = FIN_Currencies::BASE_CODE;
@@ -485,7 +486,9 @@ class FIN_Reports
         $m = FIN_Schema::table('movements');
         $c = FIN_Schema::table('categories');
 
-        list($where, $params) = self::date_where($from, $to, 'm');
+        // Por DEVENGO, no por fecha de pago: el Estado de Resultados imputa cada
+        // gasto al mes que lo generó (ver date_where).
+        list($where, $params) = self::date_where($from, $to, 'm', 'accrual_date');
         $where[]  = "m.type IN ('ingreso','egreso')";
         // El Estado de Resultados es un reporte en moneda BASE (Bs): Ventas vienen
         // de pedidos y CMV del Kardex, ambos en Bs. Los movimientos del ledger en
@@ -571,10 +574,21 @@ class FIN_Reports
     /**
      * Construye el WHERE de rango de fechas. Devuelve [array $where, array $params].
      * $alias permite prefijar la columna (p.ej. 'm' => 'm.movement_date').
+     *
+     * $field elige QUÉ fecha se filtra, y no es un detalle:
+     *  - 'movement_date' (default) = fecha de CAJA. La usan Flujo de caja y Gastos
+     *    por categoría: preguntan cuándo SALIÓ la plata.
+     *  - 'accrual_date' = fecha de DEVENGO. La usa el Estado de Resultados: pregunta
+     *    a qué mes PERTENECE el gasto. El pago mensual de IBEX se hace en julio pero
+     *    devenga en junio (son las ventas y traspasos de junio); imputarlo a julio
+     *    haría ver a junio más rentable de lo que fue y a julio, peor.
+     * Para el resto de movimientos ambas columnas son iguales, así que ningún otro
+     * reporte cambia de resultado.
      */
-    private static function date_where($from, $to, $alias = '')
+    private static function date_where($from, $to, $alias = '', $field = 'movement_date')
     {
-        $col   = ($alias !== '') ? "$alias.movement_date" : 'movement_date';
+        $field = ($field === 'accrual_date') ? 'accrual_date' : 'movement_date';
+        $col   = ($alias !== '') ? "$alias.$field" : $field;
         $where = ['1=1'];
         $params = [];
         if (!empty($from)) {

@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Finanzas VENTOVA
 Description: Tesorería y contabilidad básica para Ventova. Menú top-level "Finanzas Ventova" con pestañas: Registro de Movimientos, Cuentas, Egresos de envío (courier), Reportes y Configuración. Gestiona cuentas bancarias y de efectivo, movimientos (ingreso/egreso/transferencia) con saldo corrido y validación de saldo, categorías contables y reportes (flujo de caja, gastos por categoría, estado de resultados).
-Version: 2.15
+Version: 2.22
 Author: Ardx
 Requires Plugins: woocommerce
 */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 
 define('FIN_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('FIN_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('FIN_VERSION', '2.15');
+define('FIN_VERSION', '2.22');
 
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-schema.php';
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-permisos.php';
@@ -25,6 +25,8 @@ require_once FIN_PLUGIN_DIR . 'includes/class-fin-movements.php';
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-reports.php';
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-inventory-costs.php';
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-orders.php';
+require_once FIN_PLUGIN_DIR . 'includes/class-fin-traspasos.php';
+require_once FIN_PLUGIN_DIR . 'includes/class-fin-rendicion.php';
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-csv.php';
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-admin.php';
 

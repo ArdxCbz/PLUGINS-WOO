@@ -412,6 +412,72 @@
     border-left: 2px solid var(--fin-accent);
 }
 
+/* ── Cierre de caja chica ─────────────────────────────────────────── */
+.fin-cashlock { margin-bottom: 16px; }
+.fin-cashlock__title { margin: 0 0 10px; font-size: 15px; }
+.fin-cashlock__state {
+    display: flex;
+    gap: 10px 14px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px dashed var(--fin-border-soft);
+}
+.fin-cashlock__badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.fin-cashlock__badge.is-closed { background: #f0f0f1; border: 1px solid var(--fin-border-soft); }
+.fin-cashlock__badge.is-open   { background: #edfaef; border: 1px solid #a7d7ae; color: #1f6b2b; }
+.fin-cashlock__grid {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+}
+.fin-cashlock__field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.fin-cashlock__field > span:first-child { font-weight: 600; color: #444; }
+.fin-cashlock__pick { display: flex; gap: 6px; align-items: center; }
+.fin-cashlock__balance { font-family: var(--fin-mono); font-size: 16px; }
+.fin-cashlock__warn {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-left: 3px solid var(--fin-err);
+    background: #fcf0f1;
+    font-size: 12px;
+    line-height: 1.55;
+}
+/* Reconocimiento de irreversibilidad: la rendición no se puede deshacer. */
+.fin-cashlock__ack {
+    margin: 14px 0 0;
+    padding: 9px 12px;
+    border: 1px solid var(--fin-border-soft);
+    border-radius: 4px;
+    background: #fffbe6;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.fin-cashlock__ack label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.fin-cashlock__ack input { margin-top: 2px; }
+
+/* ── Formulario de movimientos prellenado (pago de IBEX) ───────────── */
+/* Se distingue del alta normal: no es un movimiento cualquiera, es la
+   confirmación de un pago que el panel de envíos ya calculó. */
+.fin-mov-form.is-prefilled { border-color: #2271b1; }
+.fin-prefill {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-left: 3px solid #2271b1;
+    border-radius: 3px;
+    background: #f0f6fc;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 /* ── Encabezados ordenables del historial ─────────────────────────── */
 .fin-sort { text-decoration: none; white-space: nowrap; }
 .fin-sort:hover { text-decoration: underline; }
