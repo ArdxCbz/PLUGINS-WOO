@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Inventario por Sucursal VENTOVA
 Description: Submenú "Inventario Ventova" bajo Productos. Conteo físico por sucursal con persistencia mensual, registro de mermas/defectuosos, proveedores, compras (suman stock y actualizan costos al recibir), kardex (ledger central de movimientos con saldo corrido) y exportación CSV. Incluye productos de la categoría TIENDA (también los ocultos) bajo Santa Cruz.
-Version: 3.51
+Version: 3.52
 Author: Ardx
 Requires Plugins: woocommerce
 */
@@ -11,9 +11,17 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Declarar compatibilidad con HPOS
+add_action('before_woocommerce_init', function () {
+    if (class_exists(\Automattic\WooCommerce\Utilities\FeaturesUtil::class)) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+    }
+});
+
 define('IEM_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('IEM_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('IEM_VERSION', '3.51');
+define('IEM_VERSION', '3.52');
+
 
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-schema.php';
 require_once IEM_PLUGIN_DIR . 'includes/class-iem-permisos.php';

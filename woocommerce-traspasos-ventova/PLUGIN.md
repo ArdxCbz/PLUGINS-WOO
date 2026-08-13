@@ -1,9 +1,9 @@
 # Woo Traspasos de Producto Ventova
 
 - **Slug:** `woocommerce-traspasos-ventova` (archivo principal `woo-traspasos-producto.php`)
-- **Versión:** 4.10 (schema `wc_tp_version = '1.5.0'`, sin cambios de BD)
+- **Versión:** 4.11 (schema `wc_tp_version = '1.5.0'`, sin cambios de BD)
 - **Autor:** Ardx
-- **Requiere:** WooCommerce (no declara compat HPOS; no toca pedidos, opera sobre stock de variaciones + tabla propia)
+- **Requiere:** WooCommerce (compatibilidad HPOS declarada en v4.11)
 - **Prefijos:** clases `WC_TP_*` · tabla `wp_wc_tp_history` · option `wc_tp_version` · nonce `wc_tp_nonce` · AJAX `wc_tp_*` · página `wc-traspasos`
 
 ## Propósito

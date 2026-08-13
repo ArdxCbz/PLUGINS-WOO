@@ -2,13 +2,22 @@
 /**
  * Plugin Name: HPOS Ardxoz Woo Orders
  * Description: Columnas personalizadas en lista de pedidos HPOS. Fallback a meta keys ACF legacy para transición.
- * Version: 7.11
+ * Version: 7.12
  * Author: Ardxoz
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
+
+use Automattic\WooCommerce\Utilities\FeaturesUtil;
+
+// Declarar compatibilidad con HPOS
+add_action('before_woocommerce_init', function () {
+    if (class_exists(FeaturesUtil::class)) {
+        FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+    }
+});
 
 // Constantes
 define('HAWO_PATH', plugin_dir_path(__FILE__));
@@ -26,5 +35,6 @@ foreach (glob(HAWO_PATH . 'includes/*.php') as $file) {
 
 // Inicializar columnas
 add_action('plugins_loaded', ['HPOS\\Ardxoz\\Woo\\Orders\\Column_Manager', 'init']);
+
 
 

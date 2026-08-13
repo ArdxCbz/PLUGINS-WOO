@@ -2,7 +2,7 @@
 /*
 Plugin Name: Woo Traspasos de Producto Ventova
 Description: Mueve stock entre sucursales usando variaciones; soporta también traspasos solo con descripción (envío de bienes por mensajería).
-Version: 4.10
+Version: 4.11
 Author: Ardx
 */
 
@@ -11,7 +11,15 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Declarar compatibilidad con HPOS
+add_action('before_woocommerce_init', function () {
+    if (class_exists(\Automattic\WooCommerce\Utilities\FeaturesUtil::class)) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+    }
+});
+
 // Verifica si WooCommerce está activo
+
 if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')))) {
     return;
 }

@@ -1,7 +1,7 @@
 # HPOS Ardxoz Woo Status
 
 - **Slug:** `hpos-ardxoz-woo-status`
-- **Versión:** 3.0
+- **Versión:** 3.0.1
 - **Autor:** Ardxoz
 - **Requiere:** WooCommerce (HPOS habilitado)
 - **Prefijos:** clases `HPOS_Ardxoz_Woo_Status_*` · CPT `haw_status` con metas `_hpos_ardxoz_woo_status_*` · nonce `haw_save_slug` · text-domain `haw`
@@ -99,6 +99,6 @@ el endpoint nativo `woocommerce_mark_order_status` (capability de WC). El guarda
 
 - **Guardado de color sin nonce** — `save_color_meta` solo comprueba `current_user_can('edit_post')` y `DOING_AUTOSAVE`, sin verificación de nonce (a diferencia del slug). CSRF de bajo impacto (solo cambia un color), pero inconsistente con `save_slug_meta`.
 - **CSS sin cachear** — Se recompone en cada request de admin. Con muchos estados podría engrosar el `<head>`; candidato a transient o archivo generado.
-- **Sin compat HPOS declarada** — No llama a `FeaturesUtil::declare_compatibility`. Funciona porque opera solo sobre la API de estados (no toca metas de pedido), pero WooCommerce podría marcarlo como "incompatible" en el panel de features.
+- **Compatibilidad HPOS declarada (v3.0.1)** — Llama a `FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true)` en `before_woocommerce_init`.
 - **Sin protección al borrar un estado en uso** — Eliminar un `haw_status` no migra los pedidos que ya están en ese estado; quedarían en un `post_status` no registrado (se muestran como el slug crudo). No hay aviso.
 - **Mismo icono para todos** — Todos los botones de acción usan el glifo `\e03c`; no es configurable por estado.

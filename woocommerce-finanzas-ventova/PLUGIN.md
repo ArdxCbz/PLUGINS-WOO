@@ -7,6 +7,7 @@ Ventova*). Gestiona cuentas bancarias y de efectivo, movimientos
 categorías contables y reportes (flujo de caja, gastos por categoría, estado
 de resultados).
 
+- **Versión:** 2.23
 - **Prefijo:** `FIN_` (clases), `fin_` (tablas, opciones, hooks).
 - **Slug de página:** `ventova-finanzas` (menú top-level, `dashicons-bank`).
 - **Permisos:** solo administradores (`administrator` / `shop_manager`).

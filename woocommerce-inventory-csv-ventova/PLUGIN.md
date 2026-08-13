@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Slug** | `woocommerce-inventory-csv-ventova` |
-| **Versión** | 3.49 |
+| **Versión** | 3.52 |
 | **Autor** | Ardx |
 | **Prefijo constantes** | `IEM_` |
 | **Prefijo clases** | `IEM_*` |

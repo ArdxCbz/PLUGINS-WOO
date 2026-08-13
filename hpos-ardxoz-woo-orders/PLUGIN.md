@@ -1,7 +1,7 @@
 # HPOS Ardxoz Woo Orders
 
 - **Slug:** `hpos-ardxoz-woo-orders`
-- **Versión:** 7.11
+- **Versión:** 7.12
 - **Autor:** Ardxoz
 - **Requiere:** WooCommerce (HPOS habilitado)
 - **Prefijos:** namespace `HPOS\Ardxoz\Woo\Orders\*` · funciones/AJAX `hawo_*` · constantes `HAWO_*` · columnas `haw_*`/`order_*`/`customer_data` · lee metas `_hpos_ardxoz_woo_*` (con fallback ACF legacy)
