@@ -1,7 +1,7 @@
 # HPOS Ardxoz Woo Shipping Export
 
 - **Slug:** `hpos-ardxoz-woo-shipping-export`
-- **Versión:** 1.0
+- **Versión:** 1.2
 - **Autor:** Ventova
 - **Requiere:** WooCommerce (HPOS habilitado) — `Requires Plugins: woocommerce`
 - **Prefijos:** clase `HPOS_Ardxoz_Woo_Shipping_Export` · constantes `HAWSE_*` · nonce `hawse_export_action` · página `hawse_export_shipping`

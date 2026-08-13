@@ -159,6 +159,7 @@ class HPOS_Ardxoz_Woo_Shipping_Export {
                     <table class="widefat fixed striped" style="margin-top: 15px;">
                         <thead>
                             <tr>
+                                <th>N° Pedido</th>
                                 <th>Fecha</th>
                                 <th>Concepto</th>
                                 <th>Monto</th>
@@ -168,6 +169,7 @@ class HPOS_Ardxoz_Woo_Shipping_Export {
                         <tbody>
                             <?php foreach ($preview_data['rows'] as $row): ?>
                                 <tr>
+                                    <td><a href="<?php echo esc_url($row['order_url']); ?>" target="_blank">#<?php echo esc_html($row['order_number']); ?></a></td>
                                     <td><?php echo esc_html($row[0]); ?></td>
                                     <td><?php echo esc_html($row[1]); ?></td>
                                     <td><?php echo esc_html($row[2]); ?></td>
@@ -176,7 +178,7 @@ class HPOS_Ardxoz_Woo_Shipping_Export {
                             <?php endforeach; ?>
                             <?php if (empty($preview_data['rows'])): ?>
                                 <tr>
-                                    <td colspan="4">No hay datos que coincidan con los filtros de exportación.</td>
+                                    <td colspan="5">No hay datos que coincidan con los filtros de exportación.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -241,6 +243,11 @@ class HPOS_Ardxoz_Woo_Shipping_Export {
             }
             $status_counts[$order_status]++;
 
+            // Skip cancelled orders from export rows (stats already counted above).
+            if ($order_status === 'cancelled') {
+                continue;
+            }
+
             $shipping_methods = $order->get_shipping_methods();
 
             if (empty($shipping_methods)) {
@@ -275,10 +282,12 @@ class HPOS_Ardxoz_Woo_Shipping_Export {
                     $reference = $order->get_shipping_postcode();
 
                     $rows[] = array(
-                        $date,
-                        $method_title, // Concepto = Full Method Title
-                        $costo_courier,
-                        $reference
+                        0 => $date,
+                        1 => $method_title, // Concepto = Full Method Title
+                        2 => $costo_courier,
+                        3 => $reference,
+                        'order_number' => $order->get_order_number(),
+                        'order_url'    => $order->get_edit_order_url(),
                     );
                 }
             }
@@ -308,10 +317,10 @@ class HPOS_Ardxoz_Woo_Shipping_Export {
 
         $output = fopen('php://output', 'w');
         fprintf($output, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM
-        fputcsv($output, array('Fecha', 'Concepto', 'Monto', 'Referencia'));
+        fputcsv($output, array('N° Pedido', 'Fecha', 'Concepto', 'Monto', 'Referencia'));
 
         foreach ($data['rows'] as $row) {
-            fputcsv($output, $row);
+            fputcsv($output, array($row['order_number'], $row[0], $row[1], $row[2], $row[3]));
         }
 
         fclose($output);
