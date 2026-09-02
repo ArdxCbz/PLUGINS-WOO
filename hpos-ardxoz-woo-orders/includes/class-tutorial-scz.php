@@ -11,26 +11,42 @@ class Tutorial_SCZ
         add_action('admin_notices', [__CLASS__, 'render_trigger_button']);
     }
 
-    public static function render_trigger_button()
+    public static function is_orders_screen()
     {
         $screen = get_current_screen();
-        if (!$screen || ($screen->id !== 'woocommerce_page_wc-orders' && $screen->id !== 'edit-shop_order')) {
+        if (!$screen) {
+            return false;
+        }
+        return (strpos($screen->id, 'wc-orders') !== false || strpos($screen->id, 'shop_order') !== false);
+    }
+
+    public static function render_trigger_button()
+    {
+        if (!self::is_orders_screen()) {
             return;
         }
 
         ?>
-        <div style="margin: 10px 0 15px 0;">
-            <button type="button" id="hawo-btn-tutorial-scz" class="button button-primary" style="background:#8e44ad; border-color:#7d3c98; font-weight:bold; font-size:13px; padding:5px 14px; height:auto; border-radius:6px; box-shadow:0 2px 5px rgba(142,68,173,0.3); display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
-                <span>🎓 Guía / Tutorial de Despacho SCZ</span>
-            </button>
-        </div>
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var h1 = document.querySelector('.wp-heading-inline');
+            if (h1 && !document.getElementById('hawo-btn-tutorial-scz')) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.id = 'hawo-btn-tutorial-scz';
+                btn.className = 'button button-primary page-title-action';
+                btn.style.cssText = 'background:#8e44ad; border-color:#7d3c98; font-weight:bold; font-size:13px; padding:4px 12px; margin-left:10px; border-radius:6px; box-shadow:0 2px 5px rgba(142,68,173,0.3); display:inline-flex; align-items:center; gap:6px; cursor:pointer; vertical-align:middle;';
+                btn.innerHTML = '<span>🎓 Guía de Despacho SCZ</span>';
+                h1.insertAdjacentElement('afterend', btn);
+            }
+        });
+        </script>
         <?php
     }
 
     public static function render_tutorial()
     {
-        $screen = get_current_screen();
-        if (!$screen || ($screen->id !== 'woocommerce_page_wc-orders' && $screen->id !== 'edit-shop_order')) {
+        if (!self::is_orders_screen()) {
             return;
         }
 
