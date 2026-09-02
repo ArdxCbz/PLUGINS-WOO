@@ -28,18 +28,25 @@ class Tutorial_SCZ
 
         ?>
         <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            var h1 = document.querySelector('.wp-heading-inline');
-            if (h1 && !document.getElementById('hawo-btn-tutorial-scz')) {
-                var btn = document.createElement('button');
-                btn.type = 'button';
-                btn.id = 'hawo-btn-tutorial-scz';
-                btn.className = 'button button-primary page-title-action';
-                btn.style.cssText = 'background:#8e44ad; border-color:#7d3c98; font-weight:bold; font-size:13px; padding:4px 12px; margin-left:10px; border-radius:6px; box-shadow:0 2px 5px rgba(142,68,173,0.3); display:inline-flex; align-items:center; gap:6px; cursor:pointer; vertical-align:middle;';
-                btn.innerHTML = '<span>🎓 Guía de Despacho SCZ</span>';
-                h1.insertAdjacentElement('afterend', btn);
+        (function() {
+            function initBtn() {
+                var h1 = document.querySelector('.wp-heading-inline') || document.querySelector('.wrap h1') || document.querySelector('h1');
+                if (h1 && !document.getElementById('hawo-btn-tutorial-scz')) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.id = 'hawo-btn-tutorial-scz';
+                    btn.className = 'button button-primary page-title-action';
+                    btn.style.cssText = 'background:#8e44ad; border-color:#7d3c98; font-weight:bold; font-size:13px; padding:4px 12px; margin-left:10px; border-radius:6px; box-shadow:0 2px 5px rgba(142,68,173,0.3); display:inline-flex; align-items:center; gap:6px; cursor:pointer; vertical-align:middle;';
+                    btn.innerHTML = '<span>🎓 Guía de Despacho SCZ</span>';
+                    h1.insertAdjacentElement('afterend', btn);
+                }
             }
-        });
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initBtn);
+            } else {
+                initBtn();
+            }
+        })();
         </script>
         <?php
     }
@@ -151,7 +158,6 @@ class Tutorial_SCZ
             ];
 
             var currentStep = 0;
-            var btnTrigger = document.getElementById('hawo-btn-tutorial-scz');
             var overlay    = document.getElementById('hawo-tutorial-overlay');
             var card       = document.getElementById('hawo-tutorial-card');
             var badge      = document.getElementById('hawo-tut-step-badge');
@@ -204,21 +210,28 @@ class Tutorial_SCZ
                 }
             }
 
-            function openTutorial() {
+            window.hawoOpenTutorialSCZ = function() {
+                if (!overlay || !card) return;
                 overlay.style.display = 'block';
                 card.style.display    = 'block';
                 showStep(0);
-            }
+            };
 
             function closeTutorial() {
-                overlay.style.display = 'none';
-                card.style.display    = 'none';
+                if (overlay) overlay.style.display = 'none';
+                if (card) card.style.display    = 'none';
                 clearHighlights();
             }
 
-            if (btnTrigger) {
-                btnTrigger.addEventListener('click', openTutorial);
-            }
+            // Delegación global de eventos para el botón
+            document.addEventListener('click', function(e) {
+                var btn = e.target.closest('#hawo-btn-tutorial-scz');
+                if (btn) {
+                    e.preventDefault();
+                    window.hawoOpenTutorialSCZ();
+                }
+            });
+
             if (btnClose) {
                 btnClose.addEventListener('click', closeTutorial);
             }
