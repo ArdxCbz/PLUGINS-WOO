@@ -56,6 +56,7 @@ $flash_labels = [
 $ship_n = isset($_GET['ship_n']) ? (int) $_GET['ship_n'] : null;
 $ship_s = isset($_GET['ship_s']) ? (int) $_GET['ship_s'] : 0;
 $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
+$ship_z = isset($_GET['ship_z']) ? (int) $_GET['ship_z'] : 0;
 ?>
 <div class="wrap">
     <h1 class="wp-heading-inline">Egresos de costo de envío por día (courier)</h1>
@@ -66,6 +67,7 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
             <?php echo esc_html($flash_labels[$flash_msg]); ?>
             <?php if ($flash_msg === 'ship_validated' && $ship_n !== null): ?>
                 <?php printf(' %d egreso(s) registrado(s)', $ship_n); ?>
+                <?php if ($ship_z > 0) { printf(', %d sin costo (nada que asentar)', $ship_z); } ?>
                 <?php if ($ship_s > 0) { printf(', %d omitido(s)', $ship_s); } ?>
                 <?php if ($ship_e > 0) { printf(', %d con error', $ship_e); } ?>.
             <?php endif; ?>
@@ -183,8 +185,9 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
                         inflado y <strong>repondrías un monto equivocado</strong>. Valídalos en los días de abajo.
                         <br>
                         <span class="fin-help">
-                            Un pedido sin costo cargado también cuenta como pendiente: es la señal de que falta ponerle el
-                            monto. Si de verdad no lleva costo de envío, cambiale el método de envío en el pedido y sale del panel.
+                            Un pedido con <strong>costo 0</strong> no cuenta como pendiente ni bloquea: no hay plata que
+                            asentar, así que no hay nada que validar. Aparece como <em>sin costo</em> y sigue editable —
+                            si le cargás un monto, vuelve a ser pendiente.
                             <?php if (FIN_Orders::ship_hide_before() === ''): ?>
                                 <br><strong>¿Son pedidos viejos, saldados fuera de Finanzas?</strong> No los valides:
                                 fija el <em>arranque del panel</em> en
@@ -247,6 +250,7 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
                 <p><em>No hay pedidos con método de envío permitido en el rango elegido.</em></p>
             <?php else: foreach ($ship_days as $day => $info):
                 $pending = (int) $info['pending_count'];
+                $nocost  = isset($info['nocost_count']) ? (int) $info['nocost_count'] : 0;
             ?>
                 <div class="fin-ship-day">
                     <form method="post" action="<?php echo esc_url($ship_validate_url); ?>">
@@ -257,6 +261,7 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
                             <span class="fin-help">
                                 <?php echo (int) count($info['orders']); ?> pedido(s) ·
                                 <?php echo $pending; ?> pendiente(s) ·
+                                <?php if ($nocost > 0): ?><?php echo $nocost; ?> sin costo · <?php endif; ?>
                                 <?php echo (int) $info['validated_count']; ?> validado(s) ·
                                 total pendiente <strong><?php echo esc_html(fin_money($info['pending_total'])); ?></strong>
                             </span>
@@ -291,6 +296,11 @@ $ship_e = isset($_GET['ship_e']) ? (int) $_GET['ship_e'] : 0;
                                     <td>
                                         <?php if ($o['validated']): ?>
                                             <span class="fin-status-ok">✓ Sí</span>
+                                        <?php elseif (!empty($o['nocost'])): ?>
+                                            <?php // Costo 0: no hay egreso que asentar, así que no es un
+                                                  // pendiente. Sigue editable: cargarle un monto lo devuelve
+                                                  // a pendiente. Ver FIN_Orders::shipping_day_orders(). ?>
+                                            <span class="fin-status-muted" title="Sin costo de envío: no hay nada que asentar. No bloquea la rendición.">Sin costo</span>
                                         <?php else: ?>
                                             <span class="fin-status-muted">—</span>
                                         <?php endif; ?>

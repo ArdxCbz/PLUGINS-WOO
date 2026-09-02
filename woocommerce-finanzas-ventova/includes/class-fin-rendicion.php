@@ -233,8 +233,10 @@ class FIN_Rendicion
         }
 
         // shipping_day_orders() ya devuelve SOLO los días con pendientes, y por día
-        // trae pending_count / pending_total (un pedido sin costo cargado cuenta
-        // como pendiente: es la señal de que falta el monto).
+        // trae pending_count / pending_total. Los pedidos con costo 0 NO entran ahí
+        // (estado "sin costo"): no hay egreso que asentar, así que no pueden
+        // bloquear la rendición. Antes sí contaban como pendientes y dejaban la
+        // rendición bloqueada sin salida posible.
         $days  = FIN_Orders::shipping_day_orders($from, $cutoff);
         $count = 0;
         $total = 0.0;

@@ -7,14 +7,30 @@ Ventova*). Gestiona cuentas bancarias y de efectivo, movimientos
 categorías contables y reportes (flujo de caja, gastos por categoría, estado
 de resultados).
 
-- **Versión:** 2.23
+- **Versión:** 2.24
 - **Prefijo:** `FIN_` (clases), `fin_` (tablas, opciones, hooks).
 - **Slug de página:** `ventova-finanzas` (menú top-level, `dashicons-bank`).
 - **Permisos:** solo administradores (`administrator` / `shop_manager`).
 - **Moneda:** Bolivianos (Bs/BOB), única. Helper global `fin_money()`.
 - **Dependencia:** WooCommerce activo (gate en `plugins_loaded`). **Opcionales (guardadas por `class_exists`):** plugin de Inventario (CMV desde el Kardex) y plugin **DEMV** (retención IBEX 7% en el Estado de Resultados, y resolución de la **sucursal** de cada pedido para dividir el pago IBEX — `get_orders_taxonomies()`/`SUCURSALES`); si faltan, esos valores se muestran en 0 y el pago IBEX cae al bucket `SIN SUCURSAL`.
 
-> Estado: **v2.22 — en desarrollo.** (2.22: se condensa el texto del formulario de
+> Estado: **v2.24 — en desarrollo.** (2.24: **un costo de envío 0 ya no queda pendiente
+> para siempre.** En el panel diario de courier, "validado" se derivaba **solo** de que
+> existiera el egreso en el ledger, y `register_shipping_egreso()` no puede asentar 0
+> (`register()` exige `amount > 0`). Resultado: el pedido con costo 0 nunca obtenía
+> movimiento, nunca se marcaba validado, el día **no desaparecía** del panel y
+> `FIN_Rendicion::blockers()` **bloqueaba la rendición sin salida** — el mismo punto
+> muerto que motivó `OPT_SHIP_HIDE_BEFORE`. Ahora hay **tres estados**, no dos:
+> *validado* (con egreso), ***sin costo*** (`nocost`, costo 0 → no hay plata que asentar,
+> así que no hay nada que validar) y *pendiente* (costo > 0 sin asentar). El estado
+> *sin costo* **no se persiste**: se deriva del monto en cada render, así que es
+> **autocorrectivo** — cargarle un monto > 0 lo devuelve a pendiente solo, sin marcas
+> que limpiar ni migración. No cuenta en `pending_count`/`pending_total`, por lo que no
+> bloquea la rendición; la fila sigue **editable**. Consecuencia asumida: se pierde la
+> señal de "falta cargar el monto" (un 0 y un meta ausente son indistinguibles en
+> `read_amount()`), y un día cuyos pedidos son **todos** de costo 0 desaparece del
+> panel — para volver a verlo hay que cargarle el monto al pedido desde su ficha.)
+> (2.22: se condensa el texto del formulario de
 > pago de IBEX a una línea. Se conserva la mención del mes de devengo: no tiene campo
 > propio (lo fija el servidor), así que si no se nombra ahí es invisible.)
 > (2.21: **un solo pago, dos fechas.**
@@ -112,10 +128,10 @@ de resultados).
 > (`FIN_Orders::shipping_account_id()`). **Los pendientes bloquean el cierre**
 > (`FIN_Rendicion::blockers()`): cerrar con egresos sin validar deja el saldo inflado
 > y **se recargaría un monto equivocado** — ese es todo el motivo del bloqueo. Un
-> pedido elegible **sin costo cargado también cuenta como pendiente, a propósito**:
-> es la señal de que falta ponerle el monto; si de verdad no lleva costo de envío se
-> le **cambia el método de envío al pedido** y deja de ser elegible (no hay marca de
-> descarte). La ventana que se escanea va **del día siguiente al último cierre hasta
+> pedido elegible sin costo cargado contaba como pendiente, a propósito, como señal de
+> que faltaba el monto — **revertido en 2.24**: para los envíos realmente sin costo era
+> un bloqueo de la rendición sin salida posible. Hoy un costo 0 es el estado
+> ***sin costo*** y no bloquea. La ventana que se escanea va **del día siguiente al último cierre hasta
 > el corte** — no es solo optimización: `shipping_day_orders()` hace
 > `wc_get_orders(['limit'=>-1,'return'=>'objects'])` y cargar pedidos en masa agota
 > PHP en producción; el propio cierre acota la ventana. **El candado bloquea TODO
@@ -273,7 +289,7 @@ Define el helper global `fin_money($amount)`.
 | `FIN_Reports` | `class-fin-reports.php` | **2.21:** `date_where($from,$to,$alias,$field)` elige la fecha que se filtra — Flujo de caja y Gastos por categoría por `movement_date` (**caja**), Estado de Resultados por `accrual_date` (**devengo**). `cash_flow()`, `expenses_by_category()`, `income_statement()`, `sales_from_orders()` (ventas devengadas desde pedidos; **descompone** Ventas brutas = Σ subtotal de productos, Descuentos, Venta neta = bruta − desc, y Envío cobrado como línea aparte; Cobrado/Por cobrar es memo de la Venta neta). **2.3+ (separado por moneda):** `cash_flow()`/`expenses_by_category()` devuelven `[code => rows]`; `income_statement()` es en Bs (filtra ledger a base) y agrega `other_currencies` (ingresos/egresos del ledger en otras monedas, informativo). **2.4+:** `ibex_retention($from,$to)` = retención del 7% no depositada (pedidos IBEX + Contra Entrega del período) reutilizando `HPOS_Ardxoz_Woo_DEMV_Calculator::sum_ibex_cod_retention()`; entra como **gasto operativo real** (suma a `total_gastos`, reduce la utilidad neta). |
 | `FIN_Inventory_Costs` | `class-fin-inventory-costs.php` | **Fachada para el plugin de Inventario (costos de importación).** `register($account_id,$amount,$desc,$ref_id,$ref_code)` → egreso P&L-neutral (categoría de sistema del grupo `compra_inventario`, `ref_table='iem_purchase_cost'`, `skip_balance_check`); `reverse($movement_id)` (contrasiento); `is_available()`. |
 | `FIN_Traspasos` | `class-fin-traspasos.php` | **2.20+**: el envío IBEX de los **traspasos de stock entre sucursales**, que IBEX factura junto con el de los pedidos y que hasta 2.19 **no llegaba a Finanzas** (el egreso mensual salía subvaluado). Lee el plugin de Traspasos por su API pública (`WC_TP_API::query()`, paginada; filas de tabla, no objetos) — dependencia **opcional**: sin él, `available()` es false y el pago sale solo con los pedidos. `month_sucursales($from,$to)` agrupa por mes (`date_created`) y **sucursal = ORIGEN** (lo define el propio plugin: "el pago de envío sale del origen"); un traspaso **sin `costo_envio` cargado es un PENDIENTE** y bloquea el registro del mes·sucursal. **2.21:** el pago es **UNO SOLO** (pedidos + traspasos, ref `order_shipping_ibex`); esta clase solo aporta su mitad del total (`summary()`). `legacy_movement()` detecta el egreso de traspasos **suelto de la 2.20** (`traspaso_shipping_ibex`) para bloquear el pago unificado y evitar contarlos dos veces. |
-| `FIN_Rendicion` | `class-fin-rendicion.php` | **2.17+**: rendición de la **caja chica** (= `FIN_Orders::shipping_account_id()`). Estado en la opción `fin_cash_lock` (sin tabla): `state()`, `locked_until()`, `is_locked($account_id,$date)`, `first_open_date()`, `locked_error()`, `relocate_if_locked()` (egreso automático tardío → primer día abierto), `blockers($cutoff)` (egresos de envío sin validar ≤ corte; ventana acotada por el último cierre), `balance_at($cutoff)` (= la deuda a reponer), `close($cutoff)`. **No hay `reopen()`**: rendir es irreversible (sin método ni endpoint), por eso `handle_close_cash()` exige doble validación (checkbox de reconocimiento comprobado en el SERVIDOR + confirmación en el navegador). |
+| `FIN_Rendicion` | `class-fin-rendicion.php` | **2.17+**: rendición de la **caja chica** (= `FIN_Orders::shipping_account_id()`). Estado en la opción `fin_cash_lock` (sin tabla): `state()`, `locked_until()`, `is_locked($account_id,$date)`, `first_open_date()`, `locked_error()`, `relocate_if_locked()` (egreso automático tardío → primer día abierto), `blockers($cutoff)` (egresos de envío sin validar ≤ corte; ventana acotada por el último cierre; **2.24+** los pedidos de costo 0 ya no cuentan como pendientes y por tanto no bloquean), `balance_at($cutoff)` (= la deuda a reponer), `close($cutoff)`. **No hay `reopen()`**: rendir es irreversible (sin método ni endpoint), por eso `handle_close_cash()` exige doble validación (checkbox de reconocimiento comprobado en el SERVIDOR + confirmación en el navegador). |
 | `FIN_CSV` | `class-fin-csv.php` | Streaming CSV (movimientos + reportes), anti formula-injection. |
 | `FIN_Admin` | `class-fin-admin.php` | Menú top-level, dispatcher de pestañas, endpoints admin-post, renderers. |
 
@@ -281,7 +297,7 @@ Define el helper global `fin_money($amount)`.
 
 - `admin-movements.php` — forms ingreso/egreso + transferencia + listado filtrable (encabezados ordenables) con **control de saldos**: resumen del filtro + **tabla de cuadre** por cuenta y por moneda (`Saldo inicial + Ingresos − Egresos [± Transfer. ± Apertura] = Saldo final`, con ✓/⚠ y la diferencia; aviso cuando el filtro excluye movimientos y el cuadre no aplica), y dos columnas por fila — **Saldo cuenta** y **Saldo general**, ambas **cronológicas** (`FIN_Movements::running_maps()`, por `movement_date`; ya **no** `balance_after`). Anular + export. Helpers: `filtered_totals()`, `balances_as_of()`, `running_general_map()` (**2.3+** ambos por moneda). **2.3+:** badges/saldos/resumen por moneda, filtro por moneda, campo de **TC** en ingreso/egreso de cuentas no base, traspaso con TC + vista previa del destino, y equivalente en Bs informativo por fila. **2.15+:** paginación server-side (`paginate_links`, preserva filtros/orden) con el look de DEMV — botones redondeados centrados vía `.fin-pagination` (ya no el `.tablenav` de WP).
 - `admin-accounts.php` — total tesorería **por moneda** + CRUD cuentas (form lateral con selector de **moneda** —bloqueado si la cuenta ya tiene movimientos— + listado con columna Moneda y toggle).
-- `admin-shipping.php` — pestaña **Egresos de envío**: (1) panel **courier por día** (editable, guardar/validar → un egreso por pedido, `handle_validate_shipping_day`) y (2) panel **IBEX por mes**. **2.21:** cada mes muestra **una fila por sucursal** — Pedidos (cant./total) + Traspasos (cant./total) = **A pagar**, con el estado del pago. Un solo egreso: es una sola factura de IBEX. El panel **ya no asienta**: el botón **Registrar en Movimientos** es un enlace al formulario prellenado (`FIN_Admin::ibex_source_url($month,$suc)`) — ver *Convenciones admin-post*. El estado no-registrable lo da `FIN_Admin::ibex_block()`, la **única** definición de "registrable" (la comparten panel, formulario y guardado); el panel se la pide con los totales **ya calculados**, porque llamar a `ibex_source()` por fila recargaría los pedidos de cada mes con `wc_get_orders` y agotaría la memoria de PHP en producción. `render_shipping` construye `$ibex_view`.
+- `admin-shipping.php` — pestaña **Egresos de envío**: (1) panel **courier por día** (editable, guardar/validar → un egreso por pedido, `handle_validate_shipping_day`; **2.24+** cada fila muestra *validado* / *sin costo* / pendiente, y el encabezado del día cuenta los "sin costo" aparte) y (2) panel **IBEX por mes**. **2.21:** cada mes muestra **una fila por sucursal** — Pedidos (cant./total) + Traspasos (cant./total) = **A pagar**, con el estado del pago. Un solo egreso: es una sola factura de IBEX. El panel **ya no asienta**: el botón **Registrar en Movimientos** es un enlace al formulario prellenado (`FIN_Admin::ibex_source_url($month,$suc)`) — ver *Convenciones admin-post*. El estado no-registrable lo da `FIN_Admin::ibex_block()`, la **única** definición de "registrable" (la comparten panel, formulario y guardado); el panel se la pide con los totales **ya calculados**, porque llamar a `ibex_source()` por fila recargaría los pedidos de cada mes con `wc_get_orders` y agotaría la memoria de PHP en producción. `render_shipping` construye `$ibex_view`.
 - `admin-reports.php` — chips selector de reporte + filtros de fecha + tabla + export. **2.3+:** Flujo de caja y Gastos por categoría se muestran en **sub-tablas por moneda**. En **Estado de resultados** muestra el botón **Imprimir (carta)** e incluye el partial `income-statement.php`.
 - `income-statement.php` — **partial reutilizable** del cuerpo del Estado de Resultados con presentación profesional (conceptos limpios, aclaraciones contables a notas al pie numeradas, importes deductivos entre paréntesis, totales/resultado destacados). Emite su propio `<style id="fin-pl-css">` para verse idéntico en pantalla y en impresión. Lo incluyen `admin-reports.php` y `print-report.php`. **2.3+:** bloque informativo **"Movimientos en otras monedas"** (no consolidado). **2.10+:** la línea **"Compras de inventario"** enlaza al Registro de Movimientos filtrado (`category_id` de costos de importación + `from`/`to`) para ver el detalle por movimiento; en la vista de impresión el enlace es inocuo.
 - `print-report.php` — vista de impresión autónoma del Estado de Resultados en **tamaño carta** (sin chrome de WP), con cabecera (logo de `haw_print_logo_id` si existe, o nombre del sitio) + el partial + botones Imprimir/Cerrar. La sirve `FIN_Admin::handle_print_report()` (endpoint `fin_print_report`) en pestaña nueva.
@@ -520,6 +536,17 @@ de Movimientos* (3.ª sección, `FIN_Orders::shipping_day_orders()`):
 - Egreso: fecha = **creación del pedido**, `ref_table='order_shipping'` + `ref_id`
   (idempotente — un pedido validado queda **bloqueado**, no editable),
   `skip_balance_check=true`.
+- **Tres estados por pedido (2.24+)**, no dos: **validado** (tiene su egreso en el
+  ledger), ***sin costo*** (costo 0 → no hay plata que asentar; `register()` exige
+  `amount > 0`, así que no hay egreso posible ni nada que validar) y **pendiente**
+  (costo > 0 sin asentar). Solo *pendiente* suma a `pending_count`/`pending_total`,
+  así que **solo lo pendiente bloquea la rendición**. El estado *sin costo*
+  **no se persiste** — se deriva del monto en cada render, lo que lo hace
+  **autocorrectivo**: cargarle un monto > 0 lo devuelve a pendiente sin marcas que
+  limpiar. La fila sigue editable. Contrapartida: un 0 y un meta ausente son
+  indistinguibles (`read_amount()` devuelve 0.0 en ambos casos), así que se pierde la
+  señal de "falta cargar el monto"; y un día con **todos** sus pedidos en 0 desaparece
+  del panel (el filtro de días sigue siendo `pending_count > 0`).
 - **Métodos permitidos configurables** (ya no hardcodeados): opción
   `fin_order_shipping_methods` (array de títulos). El selector de Configuración
   ofrece los métodos usados en los **últimos 6 meses**

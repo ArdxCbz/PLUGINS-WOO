@@ -1217,7 +1217,7 @@ class FIN_Admin
             'ship_to'   => isset($_POST['ship_to'])   ? sanitize_text_field((string) $_POST['ship_to'])   : '',
         ];
 
-        $validated = 0; $skipped = 0; $errors = 0;
+        $validated = 0; $skipped = 0; $errors = 0; $nocost = 0;
 
         foreach ($amounts as $oid => $val) {
             $oid = (int) $oid;
@@ -1230,6 +1230,14 @@ class FIN_Admin
             FIN_Orders::set_shipping_cost($oid, $amount);
 
             if ($do === 'validate') {
+                // Costo 0: no hay egreso que asentar. Se cuenta aparte y NO como
+                // "omitido" — omitido sonaba a que quedaba algo por hacer, y estos
+                // quedan resueltos: el panel los muestra como "sin costo" y dejan
+                // de contar como pendientes.
+                if ($amount <= 0) {
+                    $nocost++;
+                    continue;
+                }
                 $r = FIN_Orders::register_shipping_egreso($oid, $amount);
                 if (is_wp_error($r)) {
                     $errors++;
@@ -1246,6 +1254,7 @@ class FIN_Admin
             $extra['ship_n']   = $validated;
             $extra['ship_s']   = $skipped;
             $extra['ship_e']   = $errors;
+            $extra['ship_z']   = $nocost;
         } else {
             $extra['fin_msg'] = 'ship_saved';
         }

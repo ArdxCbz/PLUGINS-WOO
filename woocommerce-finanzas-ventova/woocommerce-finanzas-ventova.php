@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Finanzas VENTOVA
 Description: Tesorería y contabilidad básica para Ventova. Menú top-level "Finanzas Ventova" con pestañas: Registro de Movimientos, Cuentas, Egresos de envío (courier), Reportes y Configuración. Gestiona cuentas bancarias y de efectivo, movimientos (ingreso/egreso/transferencia) con saldo corrido y validación de saldo, categorías contables y reportes (flujo de caja, gastos por categoría, estado de resultados).
-Version: 2.23
+Version: 2.24
 Author: Ardx
 Requires Plugins: woocommerce
 */
@@ -20,7 +20,7 @@ add_action('before_woocommerce_init', function () {
 
 define('FIN_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('FIN_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('FIN_VERSION', '2.23');
+define('FIN_VERSION', '2.24');
 
 
 require_once FIN_PLUGIN_DIR . 'includes/class-fin-schema.php';

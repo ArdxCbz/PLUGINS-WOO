@@ -387,10 +387,24 @@ class FIN_Orders
      * Pedidos elegibles (método de envío permitido, estado ≠ cancelado/reembolsado)
      * creados en el rango [$from, $to], agrupados por día de creación.
      *
+     * Tres estados por pedido, no dos:
+     *   - **validado**: ya tiene su egreso en el ledger.
+     *   - **sin costo** (`nocost`): costo 0 → no hay plata que asentar, así que no
+     *     hay nada que validar. NO cuenta como pendiente y NO bloquea la rendición.
+     *   - **pendiente**: costo > 0 todavía sin asentar.
+     *
+     * El estado "sin costo" no se guarda en ninguna parte: se deriva del monto en
+     * cada render. Por eso es autocorrectivo — si al pedido se le carga un monto
+     * > 0, vuelve a ser pendiente solo. Antes, un costo 0 quedaba pendiente para
+     * siempre (`register_shipping_egreso()` no puede asentar 0: `register()` exige
+     * `amount > 0`), el día nunca desaparecía del panel y la rendición quedaba
+     * bloqueada sin salida.
+     *
      * @param string $from 'Y-m-d'
      * @param string $to   'Y-m-d'
      * @return array  ['Y-m-d' => ['orders'=>[...], 'pending_total'=>float,
-     *                 'pending_count'=>int, 'validated_count'=>int]] ordenado desc.
+     *                 'pending_count'=>int, 'validated_count'=>int,
+     *                 'nocost_count'=>int]] ordenado desc.
      */
     public static function shipping_day_orders($from, $to)
     {
@@ -451,9 +465,17 @@ class FIN_Orders
             $order_id  = $order->get_id();
             $validated = isset($validated_set[$order_id]);
             $amount    = self::read_amount($order, self::META_SHIPPING);
+            // Costo 0 sin egreso: no hay nada que asentar (ver docblock).
+            $nocost    = (!$validated && $amount <= 0);
 
             if (!isset($days[$day])) {
-                $days[$day] = ['orders' => [], 'pending_total' => 0.0, 'pending_count' => 0, 'validated_count' => 0];
+                $days[$day] = [
+                    'orders'          => [],
+                    'pending_total'   => 0.0,
+                    'pending_count'   => 0,
+                    'validated_count' => 0,
+                    'nocost_count'    => 0,
+                ];
             }
             $days[$day]['orders'][] = [
                 'id'        => $order_id,
@@ -461,11 +483,14 @@ class FIN_Orders
                 'method'    => $c['title'],
                 'amount'    => $amount,
                 'validated' => $validated,
+                'nocost'    => $nocost,
                 'status'    => wc_get_order_status_name($order->get_status()),
                 'edit_url'  => $order->get_edit_order_url(),
             ];
             if ($validated) {
                 $days[$day]['validated_count']++;
+            } elseif ($nocost) {
+                $days[$day]['nocost_count']++;
             } else {
                 $days[$day]['pending_count']++;
                 $days[$day]['pending_total'] += $amount;
@@ -474,6 +499,9 @@ class FIN_Orders
 
         // Solo se listan los días con pedidos pendientes: al validar todo un día,
         // su recuadro desaparece del panel (los días ya saldados no se muestran).
+        // Un día cuyos pedidos son todos "sin costo" tampoco se lista: no hay nada
+        // que asentar en él. Para volver a verlo hay que cargarle un monto al
+        // pedido desde su ficha en WooCommerce.
         $days = array_filter($days, static function ($d) {
             return $d['pending_count'] > 0;
         });
@@ -539,7 +567,10 @@ class FIN_Orders
             ? self::read_amount($order, self::META_SHIPPING)
             : round(max(0, (float) $amount), 2);
         if ($amount <= 0) {
-            return 0; // sin costo de envío: nada que registrar
+            // Sin costo de envío: nada que registrar. No es un error ni queda
+            // pendiente — el panel lo muestra como "sin costo" y no bloquea la
+            // rendición. Un asiento de 0 no existe: register() exige amount > 0.
+            return 0;
         }
 
         $number = (string) $order->get_order_number();
