@@ -1,0 +1,256 @@
+/* Catálogo para vendedoras — estilos de la pantalla de admin.
+   Se conserva la densidad compacta de la tabla original del tema hijo. */
+
+.vcv-wrap h1 {
+    font-size: 20px;
+    margin-bottom: 12px;
+}
+
+/* ── Filtros ─────────────────────────────────────────────────────────── */
+.vcv-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.vcv-filters select,
+.vcv-filters input[type="search"] {
+    font-size: 13px;
+    height: 30px;
+    max-width: 100%;
+}
+
+.vcv-filters .vcv-search {
+    min-width: 260px;
+}
+
+.vcv-reset {
+    color: #b32d2e;
+    text-decoration: none;
+}
+
+.vcv-summary {
+    margin: 4px 0 8px;
+    color: #646970;
+    font-size: 12px;
+}
+
+/* ── Tabla ───────────────────────────────────────────────────────────── */
+.vcv-table {
+    font-size: 13px;
+}
+
+.vcv-table th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+}
+
+.vcv-table td {
+    padding: 8px;
+    vertical-align: middle;
+}
+
+.vcv-table img {
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 3px;
+    display: block;
+}
+
+.vcv-col-img   { width: 60px; }
+.vcv-col-sku   { width: 140px; }
+.vcv-col-price { width: 150px; }
+.vcv-col-stock { width: 38%; }
+
+.vcv-title {
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.vcv-actions {
+    margin-top: 3px;
+    font-size: 11px;
+    color: #646970;
+}
+
+.vcv-actions a {
+    text-decoration: none;
+}
+
+.vcv-sep {
+    color: #c3c4c7;
+}
+
+.vcv-muted {
+    color: #a7aaad;
+}
+
+.vcv-price {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.vcv-price del {
+    font-weight: 400;
+    opacity: .6;
+}
+
+.vcv-empty {
+    text-align: center;
+    color: #646970;
+    padding: 18px !important;
+}
+
+/* ── Líneas de stock ─────────────────────────────────────────────────── */
+.vcv-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 2px 6px 2px 0;
+    white-space: nowrap;
+}
+
+/* Sucursal asignada a la vendedora: lo que puede entregar ella misma. */
+.vcv-line.is-mine {
+    background: #fff8e5;
+    box-shadow: 0 0 0 1px #f0c33c;
+    border-radius: 4px;
+    padding: 1px 5px 1px 1px;
+}
+
+.vcv-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.6;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #fff;
+}
+
+.vcv-color {
+    color: #646970;
+    font-size: 11px;
+}
+
+.vcv-qty {
+    font-weight: 700;
+    color: #2c3338;
+    font-size: 11px;
+}
+
+.vcv-total {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 11px;
+    color: #646970;
+    border-left: 1px solid #dcdcde;
+    padding-left: 8px;
+}
+
+/* ── Botón de copiar ─────────────────────────────────────────────────── */
+.vcv-col-copy {
+    width: 110px;
+}
+
+/*
+ * El texto a copiar vive en un <textarea> junto al botón (un atributo no
+ * conserva los saltos de línea de forma fiable). Se esconde con posición
+ * absoluta y no con `display:none`: algunos navegadores móviles se niegan a
+ * leer el valor de un elemento sin caja de render.
+ */
+.vcv-copy-wrap {
+    position: relative;
+}
+
+.vcv-copy-src {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+    clip-path: inset(50%);
+}
+
+.vcv-copy {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.vcv-copy .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    line-height: 1;
+}
+
+/*
+ * Lo que se copia no es la descripción resumida de la ficha:
+ *   is-auto     → borrador derivado de la descripción larga.
+ *   is-fallback → ni eso; solo nombre, precio y enlace.
+ */
+.vcv-copy.is-auto {
+    border-style: dashed;
+}
+
+.vcv-copy.is-fallback {
+    opacity: .7;
+    border-style: dashed;
+    border-color: #dba617;
+    color: #8a6100;
+}
+
+.vcv-copy.is-ok {
+    border-color: #007017;
+    color: #007017;
+}
+
+.vcv-copy.is-error {
+    border-color: #b32d2e;
+    color: #b32d2e;
+}
+
+/* ── Paginación ──────────────────────────────────────────────────────── */
+.vcv-pagination {
+    float: none;
+    margin: 12px 0;
+}
+
+/* ── Móvil: las vendedoras trabajan mucho desde el teléfono ──────────── */
+@media screen and (max-width: 782px) {
+    .vcv-filters .vcv-search {
+        min-width: 100%;
+    }
+
+    .vcv-table .vcv-col-sku {
+        display: none;
+    }
+
+    /* En pantalla estrecha el botón queda solo con el icono. */
+    .vcv-col-copy {
+        width: 48px;
+    }
+
+    .vcv-copy .vcv-copy-label {
+        display: none;
+    }
+
+    .vcv-copy.is-ok .vcv-copy-label,
+    .vcv-copy.is-error .vcv-copy-label {
+        display: inline;
+    }
+
+    .vcv-col-price,
+    .vcv-col-stock {
+        width: auto;
+    }
+}
