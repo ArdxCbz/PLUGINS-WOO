@@ -2,68 +2,18 @@
 /**
  * WooCommerce Product Columns
  *
- * Adds and manages custom columns in the product admin list.
+ * Columna "Valor Exw USD" (`costo_de_origen`, vía ACF) en la lista de productos,
+ * con soporte de ordenación y Quick Edit.
+ *
+ * MIGRADA — La columna "Stock por Sucursal" se trasladó al plugin
+ * `ventova-catalogo-vendedor` (clase `VCV_Columns`), donde las filas se
+ * precalculan en lote. La versión anterior llamaba `get_available_variations()`
+ * por cada fila de la tabla y mostraba "Sin stock en sucursales" en todos los
+ * productos simples, porque solo contemplaba `is_type('variable')`.
  */
 
 if (!defined('ABSPATH')) {
     exit;
-}
-
-// #### B) COLUMNA DE STOCK POR SUCURSAL, DE VARIACIONES
-// Agregar una nueva columna personalizada en la lista de productos de WooCommerce
-add_filter('manage_edit-product_columns', 'agregar_columna_stock_sucursal', 20);
-function agregar_columna_stock_sucursal($columns)
-{
-    if (current_user_can('administrator')) {
-        $columns['stock_sucursal'] = __('Stock por Sucursal', 'text_domain');
-    }
-    return $columns;
-}
-
-// Rellenar la columna personalizada con los datos de stock por sucursal
-add_action('manage_product_posts_custom_column', 'mostrar_stock_sucursal_columna', 10, 2);
-function mostrar_stock_sucursal_columna($column, $post_id)
-{
-    if ($column == 'stock_sucursal' && current_user_can('administrator')) {
-
-        // Obtener el producto
-        $product = wc_get_product($post_id);
-        $stock_info = '';
-
-        if ($product && $product->is_type('variable')) {
-            $variations = $product->get_available_variations();
-
-            foreach ($variations as $variation) {
-                $variation_product = wc_get_product($variation['variation_id']);
-
-                if ($variation_product) {
-                    // Obtener sucursal, color y cantidad de stock
-                    $sucursal = $variation_product->get_attribute('pa_sucursal');
-                    $color = $variation_product->get_attribute('pa_color');
-                    $stock_quantity = $variation_product->get_stock_quantity();
-
-                    // Asignación de estilos por sucursal usando match()
-                    $location_display = match ($sucursal) {
-                        'COCHABAMBA' => '<span style="background-color: #87CEEB; color: white; padding: 2px 5px; border-radius: 3px;">CBBA</span>',
-                        'SANTA CRUZ' => '<span style="background-color: #32CD32; color: white; padding: 2px 5px; border-radius: 3px;">SCZ</span>',
-                        'LA PAZ' => '<span style="background-color: #FF0000; color: white; padding: 2px 5px; border-radius: 3px;">LPZ</span>',
-                        default => '<span style="color: gray;">Sucursal desconocida</span>',
-                    };
-
-                    // Agregar stock a la información si hay stock disponible
-                    if ($stock_quantity > 0) {
-                        $stock_info .= $location_display;
-                        $stock_info .= ' → <span style="color: gray;">' . esc_html($color) . '</span> ';
-                        $stock_info .= '<span style="color: gray; font-weight: bold;">(' . $stock_quantity . ') En stock</span><br>';
-                    }
-                }
-            }
-        } else {
-            $stock_info = __('Sin stock en sucursales', 'text_domain');
-        }
-
-        echo $stock_info ?: __('No hay stock', 'text_domain');
-    }
 }
 
 // #### D) NUEVA COLUMNA "COSTO DE ORIGEN" PARA PRODUCTOS

@@ -4,15 +4,18 @@
 - **Versión:** 1.2.0.1774204497 (actualizado 2026-03-22)
 - **Autor:** Propietario
 - **Requiere:** tema padre **ventova-store** + WooCommerce (HPOS). Declara compat HPOS desde el propio tema.
-- **Prefijos:** sin namespace; funciones sueltas (`personalizar_menu_vendedor`, `agregar_columna_stock_sucursal`, `ventova_child_autoreload_orders`, `wca_*`, `custom_*`) · meta de producto `costo_de_origen` (ACF) · columnas `stock_sucursal`/`costo_origen`
+- **Prefijos:** sin namespace; funciones sueltas (`ventova_child_autoreload_orders`, `wca_*`, `custom_*`) · meta de producto `costo_de_origen` (ACF) · columna `costo_origen`
 
 ## Propósito
 
 Tema hijo que aloja **personalizaciones admin/WooCommerce** del proyecto, separadas del tema padre para
-sobrevivir a sus actualizaciones. Centra el rol **`vendedor`** (backend recortado + páginas propias), columnas de
-stock por sucursal y costo de origen en la lista de productos, cálculo automático de stock del padre como suma de
-variaciones, y una auto-recarga de la lista de pedidos HPOS. El padre [[plugin-ventova-store]] documenta su propia
-arquitectura en su `THEME.md`.
+sobrevivir a sus actualizaciones. Hoy cubre el costo de origen en la lista de productos, el cálculo automático del
+stock del padre como suma de variaciones, ajustes de frontend y de export, y una auto-recarga de la lista de
+pedidos HPOS. El padre [[plugin-ventova-store]] documenta su propia arquitectura en su `THEME.md`.
+
+> **Migrado el 2026-08-15.** Todo lo relativo al rol **`vendedor`** — recorte del backend, página "Productos" y
+> columna "Stock por Sucursal" — se trasladó al plugin `ventova-catalogo-vendedor`. Ver
+> [Qué se migró](#qué-se-migró-y-por-qué) al final.
 
 ## Archivos clave
 
@@ -20,8 +23,8 @@ arquitectura en su `THEME.md`.
 |---|---|
 | `style.css` | Cabecera del tema hijo (`Template: ventova-store`). Sin reglas CSS propias — solo metadatos. |
 | `functions.php` | Bootstrap. Enqueue del CSS del padre (auto-generado por Child Theme Configurator), **declara compat HPOS** y hace `require_once` de los 4 módulos de `inc/`. |
-| `inc/admin-cleanup.php` | Rol **vendedor**: oculta menús del backend, crea "Pedidos" (→ `wc-orders`) y "Productos" (página propia con stock por sucursal). Fix de conflicto JS de WPForms en la lista de pedidos. |
-| `inc/woocommerce-product-columns.php` | Columnas en la lista de productos: **Stock por Sucursal** (solo admin) y **Valor Exw USD** (`costo_de_origen`, con Quick Edit + ordenación). |
+| `inc/admin-cleanup.php` | Solo el fix de conflicto JS de WPForms en la lista de pedidos. Lo demás se migró. |
+| `inc/woocommerce-product-columns.php` | Columna **Valor Exw USD** (`costo_de_origen`, con Quick Edit + ordenación). |
 | `inc/woocommerce-custom.php` | Texto del botón variable → "Comprar"; columna de categoría principal para WC Order Export; **stock del padre = Σ stock de variaciones** al cambiar stock de una variación. |
 | `inc/admin-orders-autoreload.php` | Auto-recarga la lista de pedidos HPOS cada 3 min (admin + vendedor), con barra de progreso y cuenta regresiva. Excluye usuarios concretos. |
 
@@ -38,10 +41,9 @@ arquitectura en su `THEME.md`.
 
 **Actions:**
 - `before_woocommerce_init` → declara compat HPOS (apuntando al `style.css` del hijo).
-- `admin_menu` (prio 99) → recorte de menús del vendedor + páginas "Pedidos" y "Productos".
 - `admin_enqueue_scripts` (prio 9999) → `wca_fix_wpforms_conflict` (desencola scripts de WPForms en `wc-orders`).
 - `woocommerce_variation_set_stock` → recalcula el stock del producto padre.
-- `manage_product_posts_custom_column` → render de columnas de stock por sucursal y costo de origen.
+- `manage_product_posts_custom_column` → render de la columna de costo de origen.
 - `quick_edit_custom_box`, `save_post`, `admin_footer-edit.php` → Quick Edit del costo de origen (+ JS para precargar el valor).
 - `pre_get_posts` → ordenación por `costo_de_origen` (meta_value_num).
 - `admin_footer` (prio 99) → script de auto-recarga de pedidos.
@@ -75,10 +77,40 @@ arquitectura en su `THEME.md`.
 
 ## Issues conocidos / deuda técnica
 
-- **Badges de sucursal duplicados** — La lógica `match($sucursal)` con los colores CBBA/SCZ/LPZ está repetida en `admin-cleanup.php` (página vendedor) y `woocommerce-product-columns.php` (columna admin). Cambiar un color exige tocar ambos. (Misma deuda de "mapa de sucursales duplicado" que en los plugins de Orders/Print.)
-- **`get_available_variations()` es pesado** — Tanto la página del vendedor como la columna iteran todas las variaciones de cada producto variable; en listas largas de productos puede ser lento (N productos × M variaciones).
+- ~~**Badges de sucursal duplicados**~~ — Resuelto al migrar: ahora hay una sola fuente en `VCV_Sucursales::badge()`.
+- ~~**`get_available_variations()` es pesado**~~ — Resuelto al migrar: `VCV_Query` resuelve la pantalla completa en ~6 consultas de coste constante.
+- ~~**Acoplamiento a slugs de menú de plugins**~~ — Migrado a `VCV_Menu::cleanup()`; la deuda sigue existiendo, pero ya no vive aquí.
+- **`current_user_can('vendedor')` en la auto-recarga** — `admin-orders-autoreload.php:29` sigue usando un **nombre de rol donde WordPress espera una capacidad**. Solo funciona si el rol tiene una capacidad literal `vendedor`; si no, la auto-recarga nunca se activa para las vendedoras y sí para los administradores. Mismo patrón que se corrigió al migrar el resto (ver `VCV_Permisos::is_vendedor()`). **Sin verificar contra la base de producción.**
 - **Stock del padre sin debounce** — `woocommerce_variation_set_stock` recalcula y guarda el padre en cada cambio de variación; en importaciones/actualizaciones masivas dispara muchos `save()` del padre.
 - **Exclusión de auto-recarga hardcodeada** — El email excluido (`armandxcrazy@gmail.com`) está fijo en el código; añadir/quitar usuarios exige editar el array. Candidato a opción.
 - **`save_post` sin verificación de nonce explícita** — El guardado de `costo_de_origen` confía en el flujo de Quick Edit de WP; sin chequeo de capability propio podría escribirse en contextos inesperados.
-- **Acoplamiento a slugs de menú de plugins** — `remove_menu_page('hawd_depositos')`, `'vs-reglas'`, etc. dependen de los slugs exactos de otros plugins/tema. Si uno cambia su slug, el menú reaparecería para el vendedor sin aviso.
 - **`text_domain` literal** — Varias cadenas usan `'text_domain'` como dominio (placeholder sin reemplazar); no se traducen correctamente.
+
+## Qué se migró, y por qué
+
+Trasladado al plugin **`ventova-catalogo-vendedor`** el 2026-08-15:
+
+| Bloque | Estaba en | Ahora en |
+|---|---|---|
+| `personalizar_menu_vendedor()` — recorte del backend + menú "Pedidos" | `admin-cleanup.php:13` | `VCV_Menu::cleanup()` |
+| `agregar_menu_productos_personalizado()` — menú "Productos" | `admin-cleanup.php:71` | `VCV_Menu::register()` |
+| `mostrar_pagina_productos_personalizados()` — la tabla | `admin-cleanup.php:93` | `VCV_Catalogo::render()` |
+| `agregar_columna_stock_sucursal()` | `woocommerce-product-columns.php:14` | `VCV_Columns::add_column()` |
+| `mostrar_stock_sucursal_columna()` | `woocommerce-product-columns.php:24` | `VCV_Columns::render_column()` |
+
+Motivos:
+
+1. **Rendimiento.** La página listaba todo el catálogo (`posts_per_page => -1`) y llamaba
+   `get_available_variations()` por producto — la llamada más cara de WooCommerce, que además
+   construye imágenes y HTML de disponibilidad que la tabla nunca usaba. La columna del admin
+   repetía el patrón por cada fila.
+2. **Productos simples invisibles.** Ambos renders solo contemplaban `is_type('variable')`; los
+   productos simples mostraban siempre "Sin stock", aunque el filtro previo ya garantizaba que
+   tenían existencias. Su sucursal se deriva de la categoría TIENDA, regla que ya vive en
+   `IEM_Sucursales` (`woocommerce-inventory-csv-ventova`).
+3. **Faltaba lo básico para vender.** La página no tenía buscador, ni precio, ni enlace a la ficha:
+   la vendedora tenía que salir del backend y buscar el producto en la tienda pública.
+
+**No se migró** la regla `stock del padre = Σ variaciones`
+(`woocommerce-custom.php:63`): `ventova-meta-feed` depende de ella para la disponibilidad que
+publica a Meta, así que su traslado es un paso aparte con verificación propia.
