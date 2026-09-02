@@ -12,5 +12,6 @@ class Column_Manager
         Products_Column::register();
         Customer_Column::register();
         Payment_Column::register();
+        Tutorial_SCZ::init();
     }
 }
