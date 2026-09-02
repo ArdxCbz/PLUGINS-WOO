@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HPOS Ardxoz Woo Orders
  * Description: Columnas personalizadas en lista de pedidos HPOS. Fallback a meta keys ACF legacy para transición.
- * Version: 7.12
+ * Version: 7.13
  * Author: Ardxoz
  */
 

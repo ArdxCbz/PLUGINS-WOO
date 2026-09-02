@@ -20,6 +20,11 @@ class Status_Location_Column
     {
         add_filter('woocommerce_shop_order_list_table_columns', [__CLASS__, 'add_column'], 30);
         add_action('woocommerce_shop_order_list_table_custom_column', [__CLASS__, 'render_hpos'], 30, 2);
+
+        // Coloración sutil de filas por sucursal de origen (CBBA = Celeste, SCZ = Verde)
+        add_filter('woocommerce_shop_order_list_table_order_css_classes', [__CLASS__, 'add_row_sucursal_class'], 10, 2);
+        add_filter('post_class', [__CLASS__, 'add_post_sucursal_class'], 10, 3);
+        add_action('admin_head', [__CLASS__, 'render_row_styles']);
     }
 
     public static function add_column($columns)
@@ -102,5 +107,92 @@ class Status_Location_Column
         }
 
         return implode(' ', $badges);
+    }
+
+    /**
+     * Agrega la clase CSS correspondiente a la fila según la sucursal (CBBA o SCZ).
+     */
+    public static function add_row_sucursal_class($classes, $order)
+    {
+        if (!($order instanceof \WC_Order)) {
+            return $classes;
+        }
+
+        $sucursales = [];
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if (!$product) {
+                continue;
+            }
+            $suc = strtoupper(trim($product->get_attribute('pa_sucursal')));
+            if ($suc === 'COCHABAMBA' || $suc === 'SANTA CRUZ') {
+                $sucursales[$suc] = true;
+            }
+        }
+
+        if (count($sucursales) === 1) {
+            if (isset($sucursales['COCHABAMBA'])) {
+                $classes[] = 'haw-sucursal-cbba';
+            } elseif (isset($sucursales['SANTA CRUZ'])) {
+                $classes[] = 'haw-sucursal-scz';
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
+     * Fallback para CPT legacy edit.php?post_type=shop_order.
+     */
+    public static function add_post_sucursal_class($classes, $class, $post_id)
+    {
+        if (get_post_type($post_id) !== 'shop_order') {
+            return $classes;
+        }
+        $order = wc_get_order($post_id);
+        if ($order) {
+            return self::add_row_sucursal_class($classes, $order);
+        }
+        return $classes;
+    }
+
+    /**
+     * Inyecta los estilos CSS de opacidad baja para colorear las filas de CBBA y SCZ en el admin.
+     */
+    public static function render_row_styles()
+    {
+        $screen = get_current_screen();
+        if (!$screen || ($screen->id !== 'woocommerce_page_wc-orders' && $screen->id !== 'edit-shop_order')) {
+            return;
+        }
+        ?>
+        <style id="haw-sucursal-row-styles">
+            /* Fondo sutil por sucursal de origen (CBBA = Celeste, SCZ = Verde) con opacidad baja */
+            .wp-list-table tbody tr.haw-sucursal-cbba,
+            .wp-list-table tbody tr.haw-sucursal-cbba > td,
+            .wp-list-table tbody tr.haw-sucursal-cbba > th {
+                background-color: rgba(52, 152, 219, 0.12) !important;
+            }
+
+            .wp-list-table tbody tr.haw-sucursal-scz,
+            .wp-list-table tbody tr.haw-sucursal-scz > td,
+            .wp-list-table tbody tr.haw-sucursal-scz > th {
+                background-color: rgba(46, 204, 113, 0.12) !important;
+            }
+
+            /* Hover sutil manteniendo el tono */
+            .wp-list-table tbody tr.haw-sucursal-cbba:hover,
+            .wp-list-table tbody tr.haw-sucursal-cbba:hover > td,
+            .wp-list-table tbody tr.haw-sucursal-cbba:hover > th {
+                background-color: rgba(52, 152, 219, 0.22) !important;
+            }
+
+            .wp-list-table tbody tr.haw-sucursal-scz:hover,
+            .wp-list-table tbody tr.haw-sucursal-scz:hover > td,
+            .wp-list-table tbody tr.haw-sucursal-scz:hover > th {
+                background-color: rgba(46, 204, 113, 0.22) !important;
+            }
+        </style>
+        <?php
     }
 }
